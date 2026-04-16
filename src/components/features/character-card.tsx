@@ -74,38 +74,38 @@ export function CharacterCard({ character, onSelect, onDelete, onGenerate, onExp
           </div>
         )}
 
-        <div className="flex gap-1.5 mt-3">
+        <div className="flex gap-1 mt-3">
           <button
             onClick={onGenerate}
-            className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+            className="flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
           >
             <Zap className="w-3.5 h-3.5" />
             Generate
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onEdit?.(); }}
-            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer"
+            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer shrink-0"
             title="Edit"
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleCopy}
-            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer"
+            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer shrink-0"
             title="Copy prompt"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onExport?.(); }}
-            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer"
+            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer shrink-0"
             title="Export"
           >
             <Download className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete?.(); }}
-            className="p-2 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+            className="p-2 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer shrink-0"
             title="Delete"
           >
             <Trash2 className="w-3.5 h-3.5" />

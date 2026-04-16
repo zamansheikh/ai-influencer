@@ -1,7 +1,7 @@
 import type { AIProvider } from './db';
 import { getModelCapabilities } from './model-capabilities';
 
-const ANALYSIS_SYSTEM_PROMPT = `You are an expert forensic-level character analyst. Extract EVERY visual detail from the uploaded reference photo for AI image generation consistency.
+const ANALYSIS_SYSTEM_PROMPT = `You are an expert forensic-level character analyst. Extract EVERY permanent visual detail from the uploaded reference photo for AI image generation consistency.
 
 Output in this exact JSON format:
 
@@ -45,22 +45,16 @@ Output in this exact JSON format:
   },
   "buildStyle": {
     "bodyType": "",
-    "height": "",
-    "pose": "",
-    "clothing": "",
-    "makeup": ""
-  },
-  "photoStyle": {
-    "lighting": "",
-    "style": ""
+    "height": ""
   },
   "consistencyPrompt": ""
 }
 
 CRITICAL RULES for the consistencyPrompt field:
-1. Start with: "IMPORTANT: If a reference photo is attached, the FACE in the photo is the absolute source of truth. Match the face EXACTLY — same bone structure, same eyes, same nose, same lips, same skin. The text description below is supplementary detail only. The photo face MUST be preserved pixel-perfectly."
-2. Then write: "Person description: [extremely dense paragraph with ALL visual details from analysis]"
-3. End with: "CONSISTENCY RULES: Same face in every image. Never alter facial bone structure, eye shape, nose shape, or lip shape. The reference photo face is the identity — never deviate from it."
+1. ONLY describe permanent biological traits (face structure, eyes, nose, lips, skin tone, hair, body type).
+2. DO NOT describe the person's clothing, outfit, jewelry, pose, expression, or the background/lighting of the original photo.
+3. Format as a dense paragraph of only physical characteristics.
+4. DO NOT include instructions about matching the photo (those will be injected later). Just describe the permanent physical features.
 
 Be extremely detailed in every analysis field.`;
 
@@ -326,36 +320,40 @@ export async function generateContent(opts: GenerateOptions) {
   const caps = getModelCapabilities(provider.model);
   const hasRefImage = !!(referenceImage || originalAvatar);
 
-  // Build photo-first prompt
+  // Build synthesized prompt
   const promptParts: string[] = [];
 
-  // 1. Photo reference instruction (highest priority)
-  if (hasRefImage && caps.visionInput) {
-    promptParts.push(`[FACE REFERENCE PHOTO ATTACHED] — The attached photo shows the EXACT person to generate. You MUST match this face precisely: same bone structure, same eye shape, same nose, same lips, same jawline, same skin tone. The photo is the absolute source of truth for the face. Do NOT imagine a different face. Do NOT alter any facial feature. Copy the face from the photo exactly.`);
-  }
+  promptParts.push(`Generate a photorealistic portrait photo.`);
 
-  // 2. Text description (supplementary to photo, or primary if no photo)
-  if (hasRefImage && caps.visionInput) {
-    promptParts.push(`[SUPPLEMENTARY TEXT DESCRIPTION — use only to fill in details not visible in the photo]\n${consistencyPrompt}`);
-  } else {
-    promptParts.push(`[CHARACTER DESCRIPTION — no reference photo available, follow this text exactly]\n${consistencyPrompt}`);
-  }
-
-  // 3. Sponsorship
+  // 1. Sponsorship
   if (sponsorship) {
-    let sp = `\n[SPONSORSHIP] The person is promoting ${sponsorship.brand}'s ${sponsorship.product}. ${sponsorship.description}. Show the product naturally integrated — the person should interact with or showcase the product in a natural influencer style.`;
+    let sp = `[SPONSORSHIP] The person is promoting ${sponsorship.brand}'s ${sponsorship.product}. ${sponsorship.description}. Show the product naturally integrated — the person should interact with or showcase the product in a natural influencer style.`;
     if (sponsorship.productImages?.length) {
-      sp += ` Product reference images are attached — match the exact product appearance, logo, colors, and packaging.`;
+      sp += ` Match the exact product appearance from the attached product photos.`;
     }
     promptParts.push(sp);
   }
 
-  // 4. Scene
-  promptParts.push(`\n[SCENE] ${userPrompt}`);
+  // 2. Synthesize Scene & Identity
+  if (swapImage) {
+    promptParts.push(`This is an image adaptation request. Use the attached TARGET IMAGE as the primary source for the scene, but replace the person's face with the FACE REFERENCE.
 
-  // 5. Final reminder
+SCENE SETTINGS:
+${userPrompt}
+
+SUBJECT IDENTITY:
+${consistencyPrompt}`);
+  } else {
+    promptParts.push(`SCENE & OUTFIT:
+${userPrompt}
+
+SUBJECT IDENTITY:
+${consistencyPrompt}`);
+  }
+
+  // 3. Final reminder
   if (hasRefImage && caps.visionInput) {
-    promptParts.push(`\n[REMINDER] The face in the attached reference photo is the IDENTITY. Every other detail (clothing, background, pose) can change for the scene, but the FACE must remain identical to the reference photo.`);
+    promptParts.push(`CRITICAL RULE: The attached FACE REFERENCE photo is the absolute source of truth for the person's identity. You must match their facial bone structure, eye shape, nose shape, lip shape, jawline, and skin tone identically.`);
   }
 
   const fullPrompt = promptParts.join('\n\n');
@@ -401,9 +399,11 @@ async function genWithGemini(provider: AIProvider, prompt: string, images: strin
     // Additional images: swap target, product photos
     for (let i = 1; i < images.length; i++) {
       const { data, mimeType } = extractBase64(images[i]);
-      // Label the swap target image if it's the second image and swap is active
-      if (i === 1 && prompt.includes('SWAP')) {
-        parts.push({ text: 'IMAGE 2 — SWAP TARGET: The image to swap face/outfit/scene from:' });
+      // Label the swap target image if it's the second image and we asked for image adaptation
+      if (i === 1 && prompt.includes('TARGET IMAGE')) {
+        parts.push({ text: 'IMAGE 2 — TARGET IMAGE: Use this image as the primary source for the scene, pose, and outfit:' });
+      } else {
+        parts.push({ text: `IMAGE ${i + 1} — PRODUCT/ADDITIONAL PHOTO:` });
       }
       parts.push({ inlineData: { mimeType, data } });
     }

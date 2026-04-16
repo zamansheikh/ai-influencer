@@ -110,63 +110,77 @@ export default function GeneratePage() {
     if (preset.expression) setExpressionText(preset.expression);
   };
 
-  // ── LIVE PROMPT — each section maps to exactly ONE control ──
+  // ── LIVE PROMPT — dynamic image numbering, each control = one section ──
   const hasRefImage = !!(selectedCharacter?.referenceImage || selectedCharacter?.avatar);
   const livePrompt = useMemo(() => {
     if (!selectedCharacter) return null;
     const parts: string[] = [];
     const isSwap = activeTab === 'swap';
     const hasSwapTarget = isSwap && !!swapImage;
+    const hasProducts = activeTab === 'sponsored' && productImages.length > 0;
 
-    // IMAGE ORDER
-    if (hasRefImage) {
-      const guide: string[] = ['[IMAGE ORDER]'];
-      guide.push('IMAGE 1: INFLUENCER FACE — match this face exactly.');
-      if (hasSwapTarget) guide.push('IMAGE 2: TARGET IMAGE — swap source for outfit/pose/expression/scene.');
-      if (activeTab === 'sponsored' && productImages.length > 0) guide.push(`IMAGE ${hasSwapTarget ? '3+' : '2+'}: PRODUCT PHOTOS.`);
-      guide.push('Upload influencer photo FIRST, then target/product images.');
-      parts.push(guide.join('\n'));
-    }
+    // ── Dynamic image numbering ──
+    let imgNum = 1;
+    const faceImgNum = hasRefImage ? imgNum++ : 0;
+    const targetImgNum = hasSwapTarget ? imgNum++ : 0;
+    const productStartNum = hasProducts ? imgNum : 0;
 
-    // FACE (always influencer)
-    if (hasRefImage) {
-      parts.push(`[FACE — from IMAGE 1]\nMatch this face EXACTLY: bone structure, eyes, nose, lips, jawline, skin tone. This is the identity.`);
-      parts.push(`[TEXT DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
-    } else {
-      parts.push(`[CHARACTER]\n${selectedCharacter.consistencyPrompt || ''}`);
-    }
-
-    if (isSwap) {
-      // ── SWAP: each aspect is one line, no overlap ──
-      const s: string[] = ['[SWAP INSTRUCTIONS]'];
-      if (hasSwapTarget) s.push('Target image is IMAGE 2.');
-      s.push('FACE: Always influencer (IMAGE 1). Never use target face.');
-      s.push(swapExpression === 'target' ? 'EXPRESSION: Copy smile/emotion from TARGET.' : 'EXPRESSION: Influencer natural expression.');
-      s.push(swapOutfit === 'target' ? 'OUTFIT: Copy exact clothing from TARGET.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Influencer signature style.');
-      s.push(swapPose === 'target' ? 'POSE: Copy exact pose from TARGET.' : 'POSE: Natural pose, AI decides.');
-      if (swapSceneEnabled && sceneText.trim()) {
-        s.push(`BACKGROUND: ${sceneText}`);
-      } else {
-        s.push('BACKGROUND: Keep exact background from TARGET.');
+    // IMAGE MANIFEST — tells the AI exactly what each attached image is
+    if (faceImgNum || targetImgNum || productStartNum) {
+      const manifest: string[] = ['=== ATTACHED IMAGES ==='];
+      if (faceImgNum) manifest.push(`IMAGE ${faceImgNum}: This is the INFLUENCER\'S FACE. This person\'s face must appear in the output. Match every facial feature exactly.`);
+      if (targetImgNum) manifest.push(`IMAGE ${targetImgNum}: This is the TARGET REFERENCE IMAGE. Use this image as the primary source for the scene, pose, and outfit.`);
+      if (productStartNum) {
+        for (let i = 0; i < productImages.length; i++) {
+          manifest.push(`IMAGE ${productStartNum + i}: PRODUCT PHOTO #${i + 1} — show this product in the generated image.`);
+        }
       }
-      parts.push(s.join('\n'));
-    } else {
-      // ── SOCIAL / SPONSORED: each field is one section ──
-      if (sceneText.trim()) parts.push(`[SCENE] ${sceneText}`);
-      if (outfitText.trim()) parts.push(`[OUTFIT] ${outfitText}`);
-      if (poseText.trim()) parts.push(`[POSE] ${poseText}`);
-      if (expressionText.trim()) parts.push(`[EXPRESSION] ${expressionText}`);
+      manifest.push('');
+      manifest.push(`Total images attached: ${imgNum - 1}. Upload them in this exact order.`);
+      parts.push(manifest.join('\n'));
     }
 
+    parts.push(`Generate a photorealistic portrait photo.`);
+
+    // SPONSORSHIP
     if (activeTab === 'sponsored' && sponsorBrand) {
-      parts.push(`[SPONSORSHIP] Promoting ${sponsorBrand} ${sponsorProduct}. ${sponsorDesc}. Product naturally integrated.`);
+      let sp = `[SPONSORSHIP] The person is promoting ${sponsorBrand} ${sponsorProduct}. ${sponsorDesc}. Show the product naturally integrated — the person should interact with or showcase the product in a natural influencer style.`;
+      if (productStartNum) sp += ` Match the exact product appearance from the attached product photos.`;
+      parts.push(sp);
     }
+
+    // SYNTHESIZE SCENE & IDENTITY
+    if (isSwap) {
+      const s: string[] = [];
+      s.push(`This is an image adaptation request. Use the attached TARGET IMAGE as the primary source for the scene, but replace the person's face with the FACE REFERENCE.`);
+      
+      const sceneRules: string[] = [];
+      sceneRules.push(swapExpression === 'target' && targetImgNum ? 'EXPRESSION: Copied from TARGET IMAGE.' : 'EXPRESSION: Natural influencer expression.');
+      sceneRules.push(swapOutfit === 'target' && targetImgNum ? 'OUTFIT: Copied from TARGET IMAGE.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Natural influencer style.');
+      sceneRules.push(swapPose === 'target' && targetImgNum ? 'POSE: Copied from TARGET IMAGE.' : 'POSE: Natural.');
+      sceneRules.push(swapSceneEnabled && sceneText.trim() ? `BACKGROUND: ${sceneText}` : targetImgNum ? 'BACKGROUND: Copied from TARGET IMAGE.' : 'BACKGROUND: AI decides.');
+      
+      parts.push(`${s.join('\n')}\n\nSCENE SETTINGS:\n${sceneRules.join('\n')}\n\nSUBJECT IDENTITY:\n${selectedCharacter.consistencyPrompt || '(text only, no photo)'}`);
+    } else {
+      const pieces: string[] = [];
+      if (sceneText.trim()) pieces.push(`${sceneText}`);
+      if (outfitText.trim()) pieces.push(`Outfit: ${outfitText}`);
+      if (poseText.trim()) pieces.push(`Pose: ${poseText}`);
+      if (expressionText.trim()) pieces.push(`Expression: ${expressionText}`);
+      
+      parts.push(`SCENE & OUTFIT:\n${pieces.join('. ')}\n\nSUBJECT IDENTITY:\n${selectedCharacter.consistencyPrompt || '(text only, no photo)'}`);
+    }
+
+    // RATIO
     if (selectedRatio) {
-      parts.push(`[RATIO] ${selectedRatio.ratio} (${selectedRatio.width}x${selectedRatio.height}) — ${selectedRatio.platform} ${selectedRatio.label}.`);
+      parts.push(`[ASPECT RATIO] ${selectedRatio.ratio} (${selectedRatio.width}x${selectedRatio.height}) — ${selectedRatio.platform} ${selectedRatio.label}.`);
     }
-    if (hasRefImage) {
-      parts.push(`[REMINDER] IMAGE 1 = influencer face = identity. Preserve it exactly.`);
+
+    // REMINDER
+    if (faceImgNum) {
+      parts.push(`CRITICAL RULE: The attached FACE REFERENCE photo is the absolute source of truth for the person's identity. You must match their facial bone structure, eye shape, nose shape, lip shape, jawline, and skin tone identically.`);
     }
+
     return parts.join('\n\n') || null;
   }, [selectedCharacter, sceneText, outfitText, poseText, expressionText, activeTab, sponsorBrand, sponsorProduct, sponsorDesc, hasRefImage, selectedRatio, swapImage, swapExpression, swapOutfit, swapPose, swapSceneEnabled, swapCustomOutfit, productImages.length]);
 
@@ -184,13 +198,12 @@ export default function GeneratePage() {
 
       let userPrompt: string;
       if (activeTab === 'swap') {
-        const sp: string[] = [];
-        sp.push('FACE: Influencer face.');
-        sp.push(swapExpression === 'target' ? 'EXPRESSION: Copy target.' : 'EXPRESSION: Influencer natural.');
-        sp.push(swapOutfit === 'target' ? 'OUTFIT: Copy target.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Influencer style.');
-        sp.push(swapPose === 'target' ? 'POSE: Copy target.' : 'POSE: Natural.');
-        sp.push(swapSceneEnabled && sceneText.trim() ? `BACKGROUND: ${sceneText}` : 'BACKGROUND: Keep target.');
-        userPrompt = sp.join(' ');
+        const sceneRules: string[] = [];
+        sceneRules.push(swapExpression === 'target' ? 'EXPRESSION: Copied from TARGET IMAGE.' : 'EXPRESSION: Natural influencer expression.');
+        sceneRules.push(swapOutfit === 'target' ? 'OUTFIT: Copied from TARGET IMAGE.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Natural influencer style.');
+        sceneRules.push(swapPose === 'target' ? 'POSE: Copied from TARGET IMAGE.' : 'POSE: Natural.');
+        sceneRules.push(swapSceneEnabled && sceneText.trim() ? `BACKGROUND: ${sceneText}` : 'BACKGROUND: Copied from TARGET IMAGE.');
+        userPrompt = sceneRules.join('\n');
       } else {
         const pieces: string[] = [];
         if (sceneText.trim()) pieces.push(`Scene: ${sceneText}`);

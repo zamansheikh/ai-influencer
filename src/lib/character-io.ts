@@ -207,7 +207,7 @@ export const EXTERNAL_GENERATION_TEMPLATE = `Generate an AI influencer character
   "name": "Character Name",
   "analysis": {
     "coreIdentity": {
-      "apparentAge": "25-30",
+      "apparentAge": "20-25",
       "gender": "Female",
       "ethnicity": "specific heritage",
       "skinTone": "exact shade + undertone"
@@ -245,17 +245,10 @@ export const EXTERNAL_GENERATION_TEMPLATE = `Generate an AI influencer character
     },
     "buildStyle": {
       "bodyType": "slender/athletic/curvy etc",
-      "height": "estimated height",
-      "pose": "typical pose/body language",
-      "clothing": "signature style",
-      "makeup": "typical makeup style"
-    },
-    "photoStyle": {
-      "lighting": "preferred lighting setup",
-      "style": "photo style (portrait, editorial, etc)"
+      "height": "estimated height"
     }
   },
-  "consistencyPrompt": "A photorealistic portrait of [name]: [write one ultra-detailed paragraph combining ALL details from the analysis above]. Perfect face consistency, identical facial features, same person every time."
+  "consistencyPrompt": "A photorealistic portrait of [name]: [write one ultra-detailed paragraph combining ALL biological details from the analysis above]. Perfect face consistency, identical facial features, same person every time. Do NOT include clothing or background details."
 }
 
-IMPORTANT: The consistencyPrompt must be a single dense paragraph that captures EVERY visual detail so any AI image generator can recreate this exact person consistently.`;
+IMPORTANT: The consistencyPrompt must be a single dense paragraph that captures EVERY permanent biological visual detail (face structure, eyes, nose, lips, hair, skin tone) so any AI image generator can recreate this exact person consistently. DO NOT include clothing, outfits, jewelry, poses, or backgrounds.`;
