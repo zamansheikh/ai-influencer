@@ -151,16 +151,37 @@ export default function GeneratePage() {
 
     // SYNTHESIZE SCENE & IDENTITY
     if (isSwap) {
-      const s: string[] = [];
-      s.push(`This is an image adaptation request. Use the attached TARGET IMAGE as the primary source for the scene, but replace the person's face with the FACE REFERENCE.`);
-      
-      const sceneRules: string[] = [];
-      sceneRules.push(swapExpression === 'target' && targetImgNum ? 'EXPRESSION: Copied from TARGET IMAGE.' : 'EXPRESSION: Natural influencer expression.');
-      sceneRules.push(swapOutfit === 'target' && targetImgNum ? 'OUTFIT: Copied from TARGET IMAGE.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Natural influencer style.');
-      sceneRules.push(swapPose === 'target' && targetImgNum ? 'POSE: Copied from TARGET IMAGE.' : 'POSE: Natural.');
-      sceneRules.push(swapSceneEnabled && sceneText.trim() ? `BACKGROUND: ${sceneText}` : targetImgNum ? 'BACKGROUND: Copied from TARGET IMAGE.' : 'BACKGROUND: AI decides.');
-      
-      parts.push(`${s.join('\n')}\n\nSCENE SETTINGS:\n${sceneRules.join('\n')}\n\nSUBJECT IDENTITY:\n${selectedCharacter.consistencyPrompt || '(text only, no photo)'}`);
+      const tImg = targetImgNum ? `IMAGE ${targetImgNum}` : 'target';
+      const fImg = faceImgNum ? `IMAGE ${faceImgNum}` : 'reference';
+
+      const swapBlock: string[] = [];
+      swapBlock.push(`TASK: Recreate ${tImg} but with a different person's face.`);
+      swapBlock.push(`Look at ${tImg} carefully. This is your primary reference for the output image.`);
+      swapBlock.push('');
+      swapBlock.push('WHAT TO COPY FROM EACH IMAGE:');
+      swapBlock.push(`FACE: Use the person's face from ${fImg} (the influencer). Replace the face in ${tImg} with this face. Match every facial feature — bone structure, eyes, nose, lips, jawline, skin tone.`);
+      swapBlock.push(swapExpression === 'target' && targetImgNum
+        ? `EXPRESSION/SMILE: Copy the exact facial expression and smile from ${tImg}. The influencer should show the same emotion as the person in ${tImg}.`
+        : `EXPRESSION/SMILE: Use the influencer's natural expression. Do NOT copy the expression from ${tImg}.`);
+      swapBlock.push(swapOutfit === 'target' && targetImgNum
+        ? `OUTFIT/CLOTHING: Copy the EXACT outfit from ${tImg}. Replicate every detail — the fabric, color, pattern, neckline, sleeves, accessories, jewelry. The person in the output must wear the identical clothing as shown in ${tImg}.`
+        : swapOutfit === 'custom' && swapCustomOutfit
+        ? `OUTFIT/CLOTHING: Dress the person in: ${swapCustomOutfit}. Ignore the outfit in ${tImg}.`
+        : `OUTFIT/CLOTHING: Use the influencer's own signature style. Ignore the outfit in ${tImg}.`);
+      swapBlock.push(swapPose === 'target' && targetImgNum
+        ? `POSE/BODY POSITION: Match the exact body pose, hand position, and gesture from ${tImg}.`
+        : `POSE/BODY POSITION: Use a natural pose. Ignore the pose in ${tImg}.`);
+      swapBlock.push(swapSceneEnabled && sceneText.trim()
+        ? `BACKGROUND/SCENE: ${sceneText}. Ignore the background in ${tImg}.`
+        : targetImgNum
+        ? `BACKGROUND/SCENE: Keep the exact background, setting, and lighting from ${tImg}.`
+        : `BACKGROUND/SCENE: AI decides.`);
+
+      swapBlock.push('');
+      swapBlock.push(`SUBJECT IDENTITY (permanent physical traits):`);
+      swapBlock.push(selectedCharacter.consistencyPrompt || '(text only, no photo)');
+
+      parts.push(swapBlock.join('\n'));
     } else {
       const pieces: string[] = [];
       if (sceneText.trim()) pieces.push(`${sceneText}`);
@@ -198,12 +219,14 @@ export default function GeneratePage() {
 
       let userPrompt: string;
       if (activeTab === 'swap') {
-        const sceneRules: string[] = [];
-        sceneRules.push(swapExpression === 'target' ? 'EXPRESSION: Copied from TARGET IMAGE.' : 'EXPRESSION: Natural influencer expression.');
-        sceneRules.push(swapOutfit === 'target' ? 'OUTFIT: Copied from TARGET IMAGE.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Natural influencer style.');
-        sceneRules.push(swapPose === 'target' ? 'POSE: Copied from TARGET IMAGE.' : 'POSE: Natural.');
-        sceneRules.push(swapSceneEnabled && sceneText.trim() ? `BACKGROUND: ${sceneText}` : 'BACKGROUND: Copied from TARGET IMAGE.');
-        userPrompt = sceneRules.join('\n');
+        const sr: string[] = [];
+        sr.push('Recreate the TARGET IMAGE but with the influencer\'s face.');
+        sr.push(`FACE: From influencer reference.`);
+        sr.push(swapExpression === 'target' ? 'EXPRESSION: Copy the exact expression/smile from the TARGET IMAGE.' : 'EXPRESSION: Influencer natural.');
+        sr.push(swapOutfit === 'target' ? 'OUTFIT: Copy the EXACT outfit/clothing from the TARGET IMAGE — replicate fabric, color, pattern, neckline, sleeves, jewelry, every detail.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Influencer style.');
+        sr.push(swapPose === 'target' ? 'POSE: Match exact body pose from TARGET IMAGE.' : 'POSE: Natural.');
+        sr.push(swapSceneEnabled && sceneText.trim() ? `BACKGROUND: ${sceneText}` : 'BACKGROUND: Keep exact background from TARGET IMAGE.');
+        userPrompt = sr.join('\n');
       } else {
         const pieces: string[] = [];
         if (sceneText.trim()) pieces.push(`Scene: ${sceneText}`);

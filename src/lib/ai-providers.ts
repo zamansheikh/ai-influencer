@@ -336,12 +336,13 @@ export async function generateContent(opts: GenerateOptions) {
 
   // 2. Synthesize Scene & Identity
   if (swapImage) {
-    promptParts.push(`This is an image adaptation request. Use the attached TARGET IMAGE as the primary source for the scene, but replace the person's face with the FACE REFERENCE.
+    promptParts.push(`TASK: Recreate the TARGET IMAGE (IMAGE 2) but replace the person with the influencer from IMAGE 1.
+Look at IMAGE 2 carefully — this is your primary visual reference for the output.
 
-SCENE SETTINGS:
+WHAT TO DO:
 ${userPrompt}
 
-SUBJECT IDENTITY:
+SUBJECT IDENTITY (permanent physical traits of the influencer):
 ${consistencyPrompt}`);
   } else {
     promptParts.push(`SCENE & OUTFIT:
