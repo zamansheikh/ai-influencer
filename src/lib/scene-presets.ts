@@ -145,6 +145,31 @@ export const SCENE_CATEGORIES: SceneCategory[] = [
       { label: 'Street food', prompt: 'Enjoying street food at an Asian night market, neon signs, steam from food stalls, vibrant atmosphere' },
     ],
   },
+  {
+    id: 'bangladesh',
+    name: 'Bangladesh & South Asian',
+    emoji: '🇧🇩',
+    presets: [
+      { label: 'Dhaka rooftop', prompt: 'Standing on a rooftop in Dhaka city, colorful buildings below, sunset sky over the cityscape, trendy fusion outfit mixing traditional and modern, warm golden light, confident urban influencer pose' },
+      { label: 'Old Dhaka heritage', prompt: 'Walking through the historic streets of Old Dhaka, Ahsan Manzil pink palace in the background, wearing elegant traditional-modern fusion outfit, rickshaws and heritage architecture, golden afternoon light' },
+      { label: 'Cox\'s Bazar beach', prompt: 'Walking along the world\'s longest natural sea beach at Cox\'s Bazar, golden sand stretching endlessly, turquoise waves, flowing beach outfit, windblown hair, sunset golden hour, cinematic wide shot' },
+      { label: 'Sundarbans mangrove', prompt: 'Standing on a wooden boat in the Sundarbans mangrove forest, lush green canopy reflecting in calm water, adventure outfit, serene mysterious atmosphere, dappled sunlight through trees' },
+      { label: 'Tea garden Sylhet', prompt: 'Standing among the rolling green tea gardens of Sylhet, endless rows of tea bushes, misty hills in background, wearing a light elegant outfit, soft morning light, fresh and dreamy atmosphere' },
+      { label: 'Rickshaw art', prompt: 'Posing next to a colorfully painted Bangladeshi rickshaw, vibrant folk art details, busy Dhaka street, colorful outfit matching the rickshaw art, candid joyful expression' },
+      { label: 'Pohela Boishakh', prompt: 'Celebrating Pohela Boishakh (Bengali New Year), wearing a beautiful red and white saree or panjabi, alpona (rangoli) patterns on the ground, festive marigold flowers, traditional ornaments, joyful celebration atmosphere' },
+      { label: 'Boat on river', prompt: 'Sitting on a traditional wooden boat on a Bangladeshi river, calm emerald water reflecting the sky, rural green landscape, wearing a comfortable ethnic outfit, peaceful golden hour light, serene expression' },
+      { label: 'Hatirjheel sunset', prompt: 'Walking along the Hatirjheel waterfront in Dhaka at sunset, modern bridge and city lights reflecting in water, stylish urban outfit, purple and orange sky, contemporary city vibe' },
+      { label: 'Street food fuchka', prompt: 'Enjoying fuchka (panipuri) at a colorful Bangladeshi street food stall, vibrant street atmosphere, neon lights, casual trendy outfit, laughing and having fun, authentic local food experience' },
+      { label: 'Saree elegance', prompt: 'Wearing a stunning Jamdani or Muslin saree, intricate traditional Bengali weave patterns, elegant jewelry, standing in a courtyard with terracotta architecture, soft natural light, graceful traditional pose' },
+      { label: 'Lalbagh Fort', prompt: 'Posing at the historic Lalbagh Fort in Dhaka, Mughal-era red brick architecture, arched doorways, wearing elegant fusion outfit, dramatic shadows and warm afternoon light' },
+      { label: 'Village life', prompt: 'In a beautiful Bangladeshi village, green rice paddies stretching to the horizon, traditional bamboo house, wearing comfortable ethnic clothing, peaceful rural atmosphere, warm natural light' },
+      { label: 'Chittagong hills', prompt: 'Trekking in the Chittagong Hill Tracts, lush green hills and valleys, tribal-area landscape, adventure trekking outfit, misty mountain atmosphere, adventurous confident expression' },
+      { label: 'Eid celebration', prompt: 'Eid celebration look, wearing a gorgeous embroidered salwar kameez or sherwani, festive home decoration, traditional sweets on table, warm family celebration atmosphere, elegant and joyful' },
+      { label: 'Dhaka cafe culture', prompt: 'Sitting in a trendy Dhaka cafe, modern interior with exposed brick, specialty coffee, laptop and phone on table, stylish casual outfit, warm cafe lighting, content creator lifestyle' },
+      { label: 'Sonargaon heritage', prompt: 'Exploring the ancient ruins of Sonargaon, moss-covered historic buildings, old Panam City architecture, wearing an artistic outfit, mysterious vintage atmosphere, soft diffused light' },
+      { label: 'Night Dhaka skyline', prompt: 'On a high-rise balcony overlooking Dhaka city at night, millions of city lights, modern skyline with mosque minarets, elegant evening outfit, dramatic city light portrait' },
+    ],
+  },
 ];
 
 // Flatten all presets for quick access

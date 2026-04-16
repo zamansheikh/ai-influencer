@@ -4,15 +4,17 @@ import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Plus, Search, Users, Download, Upload, FileJson, Copy, Check, AlertCircle, CheckCircle2, Info,
+  Plus, Search, Users, Download, Upload, FileJson, Copy, Check, AlertCircle, CheckCircle2, Info, Pencil, Save, X, Camera,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/ui/modal';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ImageUpload } from '@/components/features/image-upload';
 import { CharacterCard } from '@/components/features/character-card';
 import { AnalysisDisplay } from '@/components/features/analysis-display';
 import { db, type Character } from '@/lib/db';
@@ -27,10 +29,70 @@ import Link from 'next/link';
 
 export default function CharactersPage() {
   const router = useRouter();
-  const { characters, removeCharacter, setSelectedCharacter, addCharacter, setCharacters } = useAppStore();
+  const { characters, setCharacters, removeCharacter, setSelectedCharacter, addCharacter } = useAppStore();
   const [search, setSearch] = useState('');
   const [viewCharacter, setViewCharacter] = useState<Character | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Edit character state
+  const [editChar, setEditChar] = useState<Character | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPrompt, setEditPrompt] = useState('');
+  const [editAvatar, setEditAvatar] = useState<string | null>(null);
+  const [editRefImage, setEditRefImage] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const editAvatarRef = useRef<HTMLInputElement>(null);
+  const editRefRef = useRef<HTMLInputElement>(null);
+
+  const openEditChar = (c: Character) => {
+    setEditChar(c);
+    setEditName(c.name);
+    setEditPrompt(c.consistencyPrompt);
+    setEditAvatar(c.avatar);
+    setEditRefImage(c.referenceImage || null);
+  };
+
+  const handleEditAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setEditAvatar(reader.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleEditRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setEditRefImage(reader.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const saveEditChar = async () => {
+    if (!editChar) return;
+    setEditSaving(true);
+    try {
+      const updates: Partial<Character> = {
+        name: editName || editChar.name,
+        consistencyPrompt: editPrompt,
+        updatedAt: Date.now(),
+      };
+      if (editAvatar) updates.avatar = editAvatar;
+      if (editRefImage !== undefined) updates.referenceImage = editRefImage || undefined;
+
+      await db.characters.update(editChar.id, updates);
+      const all = await db.characters.orderBy('updatedAt').reverse().toArray();
+      setCharacters(all);
+      setEditChar(null);
+      toast.success('Character updated!');
+    } catch {
+      toast.error('Failed to update');
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   // Import state
   const [importOpen, setImportOpen] = useState(false);
@@ -185,6 +247,7 @@ export default function CharactersPage() {
                 onDelete={() => setDeleteConfirm(character.id)}
                 onGenerate={() => { setSelectedCharacter(character); router.push('/generate'); }}
                 onExport={() => handleExportOne(character)}
+                onEdit={() => openEditChar(character)}
               />
             ))}
           </motion.div>
@@ -219,6 +282,9 @@ export default function CharactersPage() {
                   </div>
                 )}
                 <div className="flex gap-2 mt-3">
+                  <Button size="sm" variant="outline" onClick={() => { setViewCharacter(null); openEditChar(viewCharacter); }}>
+                    <Pencil className="w-3.5 h-3.5" /> Edit
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => handleExportOne(viewCharacter)}>
                     <Download className="w-3.5 h-3.5" /> Export
                   </Button>
@@ -239,6 +305,95 @@ export default function CharactersPage() {
           <Button variant="ghost" size="sm" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
           <Button variant="destructive" size="sm" onClick={() => deleteConfirm && handleDelete(deleteConfirm)}>Delete</Button>
         </div>
+      </Modal>
+
+      {/* ── Edit Character Modal ── */}
+      <Modal open={!!editChar} onClose={() => setEditChar(null)} title="Edit Character" size="lg">
+        {editChar && (
+          <div className="space-y-4">
+            {/* Name */}
+            <Input label="Character Name" id="editCharName" value={editName} onChange={(e) => setEditName(e.target.value)} />
+
+            {/* Avatar + Reference side by side */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Avatar */}
+              <div>
+                <p className="text-xs font-medium mb-2">Avatar Photo</p>
+                {editAvatar && (
+                  <div className="relative group rounded-xl overflow-hidden mb-2">
+                    <img src={editAvatar} alt="Avatar" className="w-full h-40 object-cover rounded-xl" />
+                    <button
+                      onClick={() => setEditAvatar(null)}
+                      className="absolute top-2 right-2 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-destructive"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+                <Button variant="outline" size="sm" onClick={() => editAvatarRef.current?.click()} className="w-full">
+                  <Camera className="w-3.5 h-3.5" /> {editAvatar ? 'Change Avatar' : 'Upload Avatar'}
+                </Button>
+                <input ref={editAvatarRef} type="file" accept="image/*" className="hidden" onChange={handleEditAvatarUpload} />
+              </div>
+
+              {/* Reference Image */}
+              <div>
+                <p className="text-xs font-medium mb-2">AI Reference Face <span className="text-muted-foreground">(optional)</span></p>
+                {editRefImage && (
+                  <div className="relative group rounded-xl overflow-hidden mb-2">
+                    <img src={editRefImage} alt="Reference" className="w-full h-40 object-cover rounded-xl border border-primary/30" />
+                    <span className="absolute top-2 left-2 text-[9px] bg-primary text-white px-1.5 py-0.5 rounded-full">AI Ref</span>
+                    <button
+                      onClick={() => setEditRefImage(null)}
+                      className="absolute top-2 right-2 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-destructive"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+                <Button variant="outline" size="sm" onClick={() => editRefRef.current?.click()} className="w-full">
+                  <Camera className="w-3.5 h-3.5" /> {editRefImage ? 'Change Reference' : 'Upload Reference'}
+                </Button>
+                <input ref={editRefRef} type="file" accept="image/*" className="hidden" onChange={handleEditRefUpload} />
+                <p className="text-[10px] text-muted-foreground mt-1">Clean headshot used for face consistency in generation.</p>
+              </div>
+            </div>
+
+            {/* Consistency Prompt */}
+            <Textarea
+              label="Consistency Prompt"
+              id="editConsistencyPrompt"
+              value={editPrompt}
+              onChange={(e) => setEditPrompt(e.target.value)}
+              rows={6}
+              className="font-mono text-xs"
+            />
+            <p className="text-[10px] text-muted-foreground -mt-2">
+              This is the detailed description sent to AI for face consistency. Edit carefully — this is the core identity data.
+            </p>
+
+            {/* Analysis preview (read-only) */}
+            {editChar.analysis && (
+              <details className="text-xs">
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors font-medium py-1">
+                  View forensic analysis data (read-only)
+                </summary>
+                <div className="mt-2 p-3 bg-secondary rounded-xl max-h-48 overflow-y-auto">
+                  <pre className="text-[10px] text-muted-foreground whitespace-pre-wrap font-mono">
+                    {JSON.stringify(editChar.analysis, null, 2)}
+                  </pre>
+                </div>
+              </details>
+            )}
+
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="ghost" onClick={() => setEditChar(null)}>Cancel</Button>
+              <Button onClick={saveEditChar} loading={editSaving}>
+                <Save className="w-4 h-4" /> Save Changes
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* ── Import Modal ── */}

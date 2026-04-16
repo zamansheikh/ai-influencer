@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Trash2, Copy, Zap, Clock, Check, Eye, Download } from 'lucide-react';
+import { Trash2, Copy, Zap, Clock, Check, Eye, Download, Pencil } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { copyToClipboard, getTimeAgo } from '@/lib/utils';
 import type { Character } from '@/lib/db';
@@ -13,10 +13,11 @@ interface CharacterCardProps {
   onDelete?: () => void;
   onGenerate?: () => void;
   onExport?: () => void;
+  onEdit?: () => void;
   index?: number;
 }
 
-export function CharacterCard({ character, onSelect, onDelete, onGenerate, onExport, index = 0 }: CharacterCardProps) {
+export function CharacterCard({ character, onSelect, onDelete, onGenerate, onExport, onEdit, index = 0 }: CharacterCardProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -80,6 +81,13 @@ export function CharacterCard({ character, onSelect, onDelete, onGenerate, onExp
           >
             <Zap className="w-3.5 h-3.5" />
             Generate
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit?.(); }}
+            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer"
+            title="Edit"
+          >
+            <Pencil className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleCopy}

@@ -21,6 +21,8 @@ import { getModelCapabilities, getUnavailableReason } from '@/lib/model-capabili
 import { ProviderSelector } from '@/components/features/provider-selector';
 import { copyToClipboard } from '@/lib/utils';
 import { ScenePicker } from '@/components/features/scene-picker';
+import { RatioPicker } from '@/components/features/ratio-picker';
+import type { AspectRatio } from '@/lib/aspect-ratios';
 import Link from 'next/link';
 
 const contentTabs = [
@@ -63,19 +65,35 @@ export default function GeneratePage() {
   const [sponsorDesc, setSponsorDesc] = useState('');
   const [productImages, setProductImages] = useState<string[]>([]);
   const [previewPromptCopied, setPreviewPromptCopied] = useState(false);
+  const [selectedRatio, setSelectedRatio] = useState<AspectRatio | null>(null);
 
   // Live prompt preview — builds the full prompt in real-time
+  const hasRefImage = !!(selectedCharacter?.referenceImage || selectedCharacter?.avatar);
   const livePrompt = useMemo(() => {
     if (!selectedCharacter) return null;
-    let p = selectedCharacter.consistencyPrompt || '';
+    const parts: string[] = [];
+
+    if (hasRefImage && caps?.visionInput) {
+      parts.push(`[FACE REFERENCE PHOTO ATTACHED] — Match this face EXACTLY: same bone structure, same eyes, same nose, same lips, same jawline, same skin tone. The photo is the absolute source of truth. Do NOT alter any facial feature.`);
+      parts.push(`[SUPPLEMENTARY TEXT DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
+    } else {
+      parts.push(`[CHARACTER DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
+    }
+
     if (activeTab === 'sponsored' && sponsorBrand) {
-      p += `\n\nThe person is promoting ${sponsorBrand}'s ${sponsorProduct}. ${sponsorDesc}. Show the product naturally integrated into the scene.`;
+      parts.push(`[SPONSORSHIP] Promoting ${sponsorBrand}'s ${sponsorProduct}. ${sponsorDesc}. Show product naturally integrated.`);
     }
     if (prompt.trim()) {
-      p += `\n\nScene: ${prompt}`;
+      parts.push(`[SCENE] ${prompt}`);
     }
-    return p || null;
-  }, [selectedCharacter, prompt, activeTab, sponsorBrand, sponsorProduct, sponsorDesc]);
+    if (selectedRatio) {
+      parts.push(`[ASPECT RATIO] ${selectedRatio.ratio} (${selectedRatio.width}x${selectedRatio.height}) — ${selectedRatio.platform} ${selectedRatio.label}. Frame the composition for this exact aspect ratio.`);
+    }
+    if (hasRefImage && caps?.visionInput) {
+      parts.push(`[REMINDER] The face in the reference photo is the IDENTITY. Clothing, background, pose can change — but the FACE must remain identical.`);
+    }
+    return parts.join('\n\n') || null;
+  }, [selectedCharacter, prompt, activeTab, sponsorBrand, sponsorProduct, sponsorDesc, hasRefImage, caps?.visionInput, selectedRatio]);
 
   const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -247,6 +265,9 @@ export default function GeneratePage() {
                   />
                   <div className="mt-3">
                     <ScenePicker onSelect={setPrompt} />
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <RatioPicker selected={selectedRatio} onSelect={setSelectedRatio} />
                   </div>
                 </Card>
 

@@ -1,9 +1,9 @@
 import type { AIProvider } from './db';
 import { getModelCapabilities } from './model-capabilities';
 
-const ANALYSIS_SYSTEM_PROMPT = `You are an expert forensic-level character analyst specialized in creating perfectly consistent AI-generated characters. Your job is to extract EVERY single visual detail of the person in the uploaded reference photo so that any AI image generator can recreate the exact same person with 100% consistency in every future image.
+const ANALYSIS_SYSTEM_PROMPT = `You are an expert forensic-level character analyst. Extract EVERY visual detail from the uploaded reference photo for AI image generation consistency.
 
-Analyze the face and overall appearance with maximum precision and output the description in this exact structured JSON format:
+Output in this exact JSON format:
 
 {
   "coreIdentity": {
@@ -54,10 +54,15 @@ Analyze the face and overall appearance with maximum precision and output the de
     "lighting": "",
     "style": ""
   },
-  "consistencyPrompt": "A photorealistic portrait of the exact same person as the reference photo: [insert every detail above in one flowing, extremely dense paragraph]. Perfect face consistency, identical facial features, same person every time, no changes to face or identity..."
+  "consistencyPrompt": ""
 }
 
-Be extremely detailed in every field. The consistency prompt should be a single ultra-detailed paragraph incorporating ALL details.`;
+CRITICAL RULES for the consistencyPrompt field:
+1. Start with: "IMPORTANT: If a reference photo is attached, the FACE in the photo is the absolute source of truth. Match the face EXACTLY — same bone structure, same eyes, same nose, same lips, same skin. The text description below is supplementary detail only. The photo face MUST be preserved pixel-perfectly."
+2. Then write: "Person description: [extremely dense paragraph with ALL visual details from analysis]"
+3. End with: "CONSISTENCY RULES: Same face in every image. Never alter facial bone structure, eye shape, nose shape, or lip shape. The reference photo face is the identity — never deviate from it."
+
+Be extremely detailed in every analysis field.`;
 
 // ─── Proxy ───
 async function proxyFetch(
@@ -318,20 +323,43 @@ export interface GenerateOptions {
 export async function generateContent(opts: GenerateOptions) {
   const { provider, consistencyPrompt, userPrompt, referenceImage, originalAvatar, sponsorship, forceTextOnly } = opts;
   const caps = getModelCapabilities(provider.model);
+  const hasRefImage = !!(referenceImage || originalAvatar);
 
-  // Build the text prompt
-  let fullPrompt = consistencyPrompt;
+  // Build photo-first prompt
+  const promptParts: string[] = [];
 
-  if (sponsorship) {
-    fullPrompt += `\n\nThe person is promoting ${sponsorship.brand}'s ${sponsorship.product}. ${sponsorship.description}. Show the product naturally integrated into the scene. The person should be interacting with or showcasing the product in a natural, influencer-style way.`;
-    if (sponsorship.productImages?.length) {
-      fullPrompt += `\n\nReference product images are attached. Match the exact product appearance, logo, colors, and packaging.`;
-    }
+  // 1. Photo reference instruction (highest priority)
+  if (hasRefImage && caps.visionInput) {
+    promptParts.push(`[FACE REFERENCE PHOTO ATTACHED] — The attached photo shows the EXACT person to generate. You MUST match this face precisely: same bone structure, same eye shape, same nose, same lips, same jawline, same skin tone. The photo is the absolute source of truth for the face. Do NOT imagine a different face. Do NOT alter any facial feature. Copy the face from the photo exactly.`);
   }
 
-  fullPrompt += `\n\nScene: ${userPrompt}`;
+  // 2. Text description (supplementary to photo, or primary if no photo)
+  if (hasRefImage && caps.visionInput) {
+    promptParts.push(`[SUPPLEMENTARY TEXT DESCRIPTION — use only to fill in details not visible in the photo]\n${consistencyPrompt}`);
+  } else {
+    promptParts.push(`[CHARACTER DESCRIPTION — no reference photo available, follow this text exactly]\n${consistencyPrompt}`);
+  }
 
-  // Collect all reference images to send (face ref + product photos)
+  // 3. Sponsorship
+  if (sponsorship) {
+    let sp = `\n[SPONSORSHIP] The person is promoting ${sponsorship.brand}'s ${sponsorship.product}. ${sponsorship.description}. Show the product naturally integrated — the person should interact with or showcase the product in a natural influencer style.`;
+    if (sponsorship.productImages?.length) {
+      sp += ` Product reference images are attached — match the exact product appearance, logo, colors, and packaging.`;
+    }
+    promptParts.push(sp);
+  }
+
+  // 4. Scene
+  promptParts.push(`\n[SCENE] ${userPrompt}`);
+
+  // 5. Final reminder
+  if (hasRefImage && caps.visionInput) {
+    promptParts.push(`\n[REMINDER] The face in the attached reference photo is the IDENTITY. Every other detail (clothing, background, pose) can change for the scene, but the FACE must remain identical to the reference photo.`);
+  }
+
+  const fullPrompt = promptParts.join('\n\n');
+
+  // Collect reference images
   const images: string[] = [];
   if (caps.visionInput) {
     if (referenceImage) images.push(referenceImage);
@@ -361,17 +389,22 @@ async function genWithGemini(provider: AIProvider, prompt: string, images: strin
 
   const parts: Record<string, unknown>[] = [];
 
+  // Face reference image FIRST — so the model sees it before the text
   if (images.length > 0) {
-    parts.push({ text: 'Reference images for the person and/or products (use these for visual consistency):' });
-    for (const img of images) {
-      const { data, mimeType } = extractBase64(img);
+    parts.push({ text: 'FACE REFERENCE PHOTO — this is the person. Match this face EXACTLY in the generated image:' });
+    const { data: faceData, mimeType: faceMime } = extractBase64(images[0]);
+    parts.push({ inlineData: { mimeType: faceMime, data: faceData } });
+
+    // Additional images (product photos etc.)
+    for (let i = 1; i < images.length; i++) {
+      const { data, mimeType } = extractBase64(images[i]);
       parts.push({ inlineData: { mimeType, data } });
     }
   }
 
   // If model claims image gen, try IMAGE output first
   if (canGenImage) {
-    parts.push({ text: `Generate an image based on this description:\n\n${prompt}` });
+    parts.push({ text: `Generate an image of this EXACT person (from the reference photo above) in a new scene:\n\n${prompt}` });
     try {
       const data = await proxyFetch(url, {}, {
         contents: [{ parts }],
@@ -440,15 +473,16 @@ async function genWithOpenAI(provider: AIProvider, prompt: string, images: strin
     return { prompt, result: imgResult, type: 'image' as const };
   }
 
-  // Vision model: send images + get text prompt back
+  // Vision model: send face reference + get text prompt back
   const content: Record<string, unknown>[] = [];
   if (images.length > 0) {
-    content.push({ type: 'text', text: 'Reference images for the person (maintain face consistency):' });
-    for (const img of images) {
-      content.push({ type: 'image_url', image_url: { url: img } });
+    content.push({ type: 'text', text: 'FACE REFERENCE PHOTO — this is the exact person. Describe this face with extreme precision so any AI can recreate it:' });
+    content.push({ type: 'image_url', image_url: { url: images[0] } });
+    for (let i = 1; i < images.length; i++) {
+      content.push({ type: 'image_url', image_url: { url: images[i] } });
     }
   }
-  content.push({ type: 'text', text: `Generate a detailed image prompt:\n\n${prompt}\n\nReturn only the refined prompt.` });
+  content.push({ type: 'text', text: `Based on the reference photo above, generate an ultra-detailed image prompt that would recreate this EXACT same person in a new scene. The prompt must start with face details from the photo. Include:\n\n${prompt}\n\nReturn only the refined prompt. Start with the face description from the photo.` });
 
   const data = await proxyFetch(`${baseUrl}/chat/completions`, { Authorization: `Bearer ${provider.apiKey}` }, {
     model,
@@ -469,12 +503,13 @@ async function genWithQwen(provider: AIProvider, prompt: string, images: string[
 
   const content: Record<string, unknown>[] = [];
   if (images.length > 0) {
-    content.push({ type: 'text', text: 'Reference images for the person (maintain face consistency):' });
-    for (const img of images) {
-      content.push({ type: 'image_url', image_url: { url: img } });
+    content.push({ type: 'text', text: 'FACE REFERENCE PHOTO — this is the exact person. Describe this face with extreme precision so any AI can recreate it:' });
+    content.push({ type: 'image_url', image_url: { url: images[0] } });
+    for (let i = 1; i < images.length; i++) {
+      content.push({ type: 'image_url', image_url: { url: images[i] } });
     }
   }
-  content.push({ type: 'text', text: `Generate a detailed image prompt:\n\n${prompt}\n\nReturn only the refined prompt.` });
+  content.push({ type: 'text', text: `Based on the reference photo above, generate an ultra-detailed image prompt that would recreate this EXACT same person in a new scene. The prompt must start with face details from the photo. Include:\n\n${prompt}\n\nReturn only the refined prompt. Start with the face description from the photo.` });
 
   const data = await proxyFetch(`${baseUrl}/chat/completions`, { Authorization: `Bearer ${provider.apiKey}` }, {
     model,
