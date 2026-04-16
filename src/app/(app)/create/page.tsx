@@ -18,6 +18,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ImageUpload } from '@/components/features/image-upload';
 import { AnalysisDisplay } from '@/components/features/analysis-display';
 import { ProviderSelector } from '@/components/features/provider-selector';
+import { ScenePicker } from '@/components/features/scene-picker';
 import { db, type Character, type CharacterAnalysis } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { analyzeImage, generateReferenceImage, generateContent } from '@/lib/ai-providers';
@@ -143,12 +144,7 @@ export default function CreateCharacterPage() {
     }
   };
 
-  const quickPrompts = [
-    'Casual selfie in a trendy coffee shop, warm lighting',
-    'Standing in a park during golden hour, portrait style',
-    'Professional headshot, modern office, business attire',
-    'Rooftop bar at night, city skyline, elegant outfit',
-  ];
+  // removed — using ScenePicker component instead
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -379,14 +375,7 @@ export default function CreateCharacterPage() {
 
                   <Textarea id="genPrompt" placeholder="Describe the scene, pose, setting..." value={genPrompt} onChange={(e) => setGenPrompt(e.target.value)} rows={3} />
                   <div className="mt-3">
-                    <p className="text-[11px] text-muted-foreground mb-2">Quick ideas:</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {quickPrompts.map((p) => (
-                        <button key={p} onClick={() => setGenPrompt(p)} className="px-2.5 py-1 rounded-lg text-[11px] bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                          {p.split(',')[0]}
-                        </button>
-                      ))}
-                    </div>
+                    <ScenePicker onSelect={setGenPrompt} />
                   </div>
                   <Button onClick={handleGenerate} loading={generating} disabled={!genPrompt.trim()} className="w-full mt-4">
                     <Zap className="w-4 h-4" /> {generating ? 'Generating...' : caps?.imageGeneration ? 'Generate Image' : 'Generate Prompt'}

@@ -20,20 +20,12 @@ import { generateContent, type SponsorshipData } from '@/lib/ai-providers';
 import { getModelCapabilities, getUnavailableReason } from '@/lib/model-capabilities';
 import { ProviderSelector } from '@/components/features/provider-selector';
 import { copyToClipboard } from '@/lib/utils';
+import { ScenePicker } from '@/components/features/scene-picker';
 import Link from 'next/link';
 
 const contentTabs = [
   { id: 'social', label: 'Social Media', icon: <ImageIcon className="w-4 h-4" /> },
   { id: 'sponsored', label: 'Sponsored', icon: <Megaphone className="w-4 h-4" /> },
-];
-
-const presetPrompts = [
-  { label: 'Casual selfie', prompt: 'Taking a casual selfie in a trendy coffee shop, natural smile, warm lighting' },
-  { label: 'Outdoor', prompt: 'Standing in a beautiful park during golden hour, professional portrait' },
-  { label: 'Fitness', prompt: 'At the gym, athletic wear, confident pose, dynamic lighting' },
-  { label: 'Business', prompt: 'Professional headshot in a modern office, business attire' },
-  { label: 'Travel', prompt: 'Stunning mountain landscape, travel outfit, adventurous vibe' },
-  { label: 'Night out', prompt: 'Stylish rooftop bar at night, city skyline, elegant outfit' },
 ];
 
 export default function GeneratePage() {
@@ -253,19 +245,8 @@ export default function GeneratePage() {
                     onChange={(e) => setPrompt(e.target.value)}
                     rows={3}
                   />
-                  <div className="mt-2.5">
-                    <p className="text-[11px] text-muted-foreground mb-1.5">Quick presets:</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {presetPrompts.map((p) => (
-                        <button
-                          key={p.label}
-                          onClick={() => setPrompt(p.prompt)}
-                          className="px-2.5 py-1 rounded-lg text-[11px] bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="mt-3">
+                    <ScenePicker onSelect={setPrompt} />
                   </div>
                 </Card>
 
