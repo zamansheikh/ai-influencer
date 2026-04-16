@@ -79,7 +79,7 @@ export interface GeneratedContent {
 export interface AIProvider {
   id: string;
   name: string;
-  provider: 'gemini' | 'openai' | 'anthropic' | 'stability' | 'custom';
+  provider: 'gemini' | 'openai' | 'anthropic' | 'qwen' | 'stability' | 'custom';
   apiKey: string;
   model: string;
   baseUrl?: string;

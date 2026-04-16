@@ -11,6 +11,7 @@ import {
   Trash2,
   Check,
   Shield,
+  Bot,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ const providerOptions = [
   { value: 'gemini', label: 'Google Gemini' },
   { value: 'openai', label: 'OpenAI (GPT-4o / DALL-E)' },
   { value: 'anthropic', label: 'Anthropic Claude' },
+  { value: 'qwen', label: 'Qwen (Dialagram Router)' },
   { value: 'custom', label: 'Custom (OpenAI-compatible)' },
 ];
 
@@ -32,13 +34,26 @@ const defaultModels: Record<string, string> = {
   gemini: 'gemini-2.5-flash',
   openai: 'gpt-4o',
   anthropic: 'claude-sonnet-4-6',
+  qwen: 'qwen-3.6-plus-thinking',
   custom: '',
 };
+
+const defaultBaseUrls: Record<string, string> = {
+  qwen: 'https://www.dialagram.me/router/v1',
+};
+
+const qwenModels = [
+  { value: 'qwen-3.6-plus-thinking', label: 'Qwen 3.6 Plus Thinking' },
+  { value: 'qwen-3.6-plus', label: 'Qwen 3.6 Plus' },
+  { value: 'qwen-3.5-plus-thinking', label: 'Qwen 3.5 Plus Thinking' },
+  { value: 'qwen-3.5-plus', label: 'Qwen 3.5 Plus' },
+];
 
 const providerIcons: Record<string, typeof Sparkles> = {
   gemini: Sparkles,
   openai: Brain,
   anthropic: Cpu,
+  qwen: Bot,
   custom: Globe,
 };
 
@@ -62,6 +77,7 @@ export function ProviderSetup() {
   const handleProviderChange = (value: string) => {
     setProvider(value);
     setModel(defaultModels[value] || '');
+    setBaseUrl(defaultBaseUrls[value] || '');
   };
 
   const toggleCapability = (cap: string) => {
@@ -154,22 +170,38 @@ export function ProviderSetup() {
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
           />
-          <Input
-            label="Model"
-            id="model"
-            placeholder={defaultModels[provider]}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-          />
-          {(provider === 'custom' || provider === 'openai') && (
-            <Input
-              label="Base URL (optional)"
-              id="baseUrl"
-              placeholder="https://api.example.com/v1"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              className="md:col-span-2"
+          {provider === 'qwen' ? (
+            <Select
+              label="Model"
+              id="model"
+              options={qwenModels}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
             />
+          ) : (
+            <Input
+              label="Model"
+              id="model"
+              placeholder={defaultModels[provider]}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            />
+          )}
+          {(provider === 'custom' || provider === 'openai' || provider === 'qwen') && (
+            <div className="md:col-span-2">
+              <Input
+                label={provider === 'qwen' ? 'Router Endpoint' : 'Base URL (optional)'}
+                id="baseUrl"
+                placeholder={provider === 'qwen' ? 'https://www.dialagram.me/router/v1' : 'https://api.example.com/v1'}
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+              />
+              {provider === 'qwen' && (
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Dialagram Nexum router endpoint (OpenAI-compatible)
+                </p>
+              )}
+            </div>
           )}
         </div>
 

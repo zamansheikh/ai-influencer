@@ -58,6 +58,27 @@ Analyze the face and overall appearance with maximum precision and output the de
 
 Be extremely detailed in every field. The consistency prompt should be a single ultra-detailed paragraph incorporating ALL details.`;
 
+// All external API calls go through our Next.js proxy to avoid CORS issues
+async function proxyFetch(
+  targetUrl: string,
+  headers: Record<string, string>,
+  payload: unknown
+) {
+  const response = await fetch('/api/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetUrl, headers, payload }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || data.error) {
+    throw new Error(data.error || `API error (${response.status})`);
+  }
+
+  return data;
+}
+
 export async function analyzeImage(
   provider: AIProvider,
   imageBase64: string
@@ -76,6 +97,8 @@ export async function analyzeImage(
       return analyzeWithOpenAI(provider, imageBase64);
     case 'anthropic':
       return analyzeWithAnthropic(provider, base64Data, mimeType);
+    case 'qwen':
+      return analyzeWithQwen(provider, imageBase64);
     default:
       return analyzeWithCustom(provider, imageBase64);
   }
@@ -87,38 +110,28 @@ async function analyzeWithGemini(
   mimeType: string
 ) {
   const model = provider.model || 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${provider.apiKey}`;
+  const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${provider.apiKey}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            { text: ANALYSIS_SYSTEM_PROMPT },
-            {
-              inlineData: {
-                mimeType,
-                data: base64Data,
-              },
+  const data = await proxyFetch(targetUrl, {}, {
+    contents: [
+      {
+        parts: [
+          { text: ANALYSIS_SYSTEM_PROMPT },
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data,
             },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: 'application/json',
+          },
+        ],
       },
-    }),
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: 'application/json',
+    },
   });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini API error: ${err}`);
-  }
-
-  const data = await response.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('No response from Gemini');
 
@@ -133,13 +146,10 @@ async function analyzeWithOpenAI(provider: AIProvider, imageBase64: string) {
   const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
   const model = provider.model || 'gpt-4o';
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${provider.apiKey}`,
-    },
-    body: JSON.stringify({
+  const data = await proxyFetch(
+    `${baseUrl}/chat/completions`,
+    { Authorization: `Bearer ${provider.apiKey}` },
+    {
       model,
       messages: [
         { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
@@ -147,24 +157,15 @@ async function analyzeWithOpenAI(provider: AIProvider, imageBase64: string) {
           role: 'user',
           content: [
             { type: 'text', text: 'Analyze this person in the photo with forensic-level detail.' },
-            {
-              type: 'image_url',
-              image_url: { url: imageBase64 },
-            },
+            { type: 'image_url', image_url: { url: imageBase64 } },
           ],
         },
       ],
       response_format: { type: 'json_object' },
       temperature: 0.1,
-    }),
-  });
+    }
+  );
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`OpenAI API error: ${err}`);
-  }
-
-  const data = await response.json();
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error('No response from OpenAI');
 
@@ -183,15 +184,13 @@ async function analyzeWithAnthropic(
   const baseUrl = provider.baseUrl || 'https://api.anthropic.com/v1';
   const model = provider.model || 'claude-sonnet-4-6';
 
-  const response = await fetch(`${baseUrl}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  const data = await proxyFetch(
+    `${baseUrl}/messages`,
+    {
       'x-api-key': provider.apiKey,
       'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
     },
-    body: JSON.stringify({
+    {
       model,
       max_tokens: 4096,
       system: ANALYSIS_SYSTEM_PROMPT,
@@ -214,15 +213,9 @@ async function analyzeWithAnthropic(
           ],
         },
       ],
-    }),
-  });
+    }
+  );
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Anthropic API error: ${err}`);
-  }
-
-  const data = await response.json();
   const text = data.content?.[0]?.text;
   if (!text) throw new Error('No response from Anthropic');
 
@@ -236,16 +229,50 @@ async function analyzeWithAnthropic(
   };
 }
 
+async function analyzeWithQwen(provider: AIProvider, imageBase64: string) {
+  const baseUrl = provider.baseUrl || 'https://www.dialagram.me/router/v1';
+  const model = provider.model || 'qwen-3.6-plus-thinking';
+
+  const data = await proxyFetch(
+    `${baseUrl}/chat/completions`,
+    { Authorization: `Bearer ${provider.apiKey}` },
+    {
+      model,
+      messages: [
+        { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Analyze this person in the photo with forensic-level detail.' },
+            { type: 'image_url', image_url: { url: imageBase64 } },
+          ],
+        },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
+    }
+  );
+
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error('No response from Qwen');
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not parse JSON from Qwen response');
+
+  const parsed = JSON.parse(jsonMatch[0]);
+  return {
+    analysis: parsed,
+    consistencyPrompt: parsed.consistencyPrompt || '',
+  };
+}
+
 async function analyzeWithCustom(provider: AIProvider, imageBase64: string) {
   if (!provider.baseUrl) throw new Error('Custom provider requires a base URL');
 
-  const response = await fetch(`${provider.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${provider.apiKey}`,
-    },
-    body: JSON.stringify({
+  const data = await proxyFetch(
+    `${provider.baseUrl}/chat/completions`,
+    { Authorization: `Bearer ${provider.apiKey}` },
+    {
       model: provider.model,
       messages: [
         { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
@@ -259,15 +286,9 @@ async function analyzeWithCustom(provider: AIProvider, imageBase64: string) {
       ],
       response_format: { type: 'json_object' },
       temperature: 0.1,
-    }),
-  });
+    }
+  );
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Custom API error: ${err}`);
-  }
-
-  const data = await response.json();
   const text = data.choices?.[0]?.message?.content;
   if (!text) throw new Error('No response from custom provider');
 
@@ -297,6 +318,8 @@ export async function generateContent(
       return generateWithGemini(provider, fullPrompt);
     case 'openai':
       return generateWithOpenAI(provider, fullPrompt);
+    case 'qwen':
+      return generateWithQwen(provider, fullPrompt);
     default:
       return { prompt: fullPrompt, result: null };
   }
@@ -304,23 +327,13 @@ export async function generateContent(
 
 async function generateWithGemini(provider: AIProvider, prompt: string) {
   const model = provider.model || 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${provider.apiKey}`;
+  const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${provider.apiKey}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: `Generate an image based on this description:\n\n${prompt}` }] }],
-      generationConfig: { responseModalities: ['TEXT'] },
-    }),
+  const data = await proxyFetch(targetUrl, {}, {
+    contents: [{ parts: [{ text: `Generate an image based on this description:\n\n${prompt}` }] }],
+    generationConfig: { responseModalities: ['TEXT'] },
   });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini generation error: ${err}`);
-  }
-
-  const data = await response.json();
   return {
     prompt,
     result: data.candidates?.[0]?.content?.parts?.[0]?.text || prompt,
@@ -330,29 +343,45 @@ async function generateWithGemini(provider: AIProvider, prompt: string) {
 async function generateWithOpenAI(provider: AIProvider, prompt: string) {
   const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
 
-  const response = await fetch(`${baseUrl}/images/generations`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${provider.apiKey}`,
-    },
-    body: JSON.stringify({
+  const data = await proxyFetch(
+    `${baseUrl}/images/generations`,
+    { Authorization: `Bearer ${provider.apiKey}` },
+    {
       model: 'dall-e-3',
       prompt,
       n: 1,
       size: '1024x1024',
       quality: 'hd',
-    }),
-  });
+    }
+  );
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`OpenAI image generation error: ${err}`);
-  }
-
-  const data = await response.json();
   return {
     prompt,
     result: data.data?.[0]?.url || null,
+  };
+}
+
+async function generateWithQwen(provider: AIProvider, prompt: string) {
+  const baseUrl = provider.baseUrl || 'https://www.dialagram.me/router/v1';
+  const model = provider.model || 'qwen-3.6-plus-thinking';
+
+  const data = await proxyFetch(
+    `${baseUrl}/chat/completions`,
+    { Authorization: `Bearer ${provider.apiKey}` },
+    {
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: `Generate an extremely detailed image prompt based on this description. Return only the refined prompt text, nothing else:\n\n${prompt}`,
+        },
+      ],
+      temperature: 0.7,
+    }
+  );
+
+  return {
+    prompt,
+    result: data.choices?.[0]?.message?.content || prompt,
   };
 }
