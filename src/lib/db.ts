@@ -3,7 +3,8 @@ import Dexie, { type EntityTable } from 'dexie';
 export interface Character {
   id: string;
   name: string;
-  avatar: string; // base64 data URL
+  avatar: string;          // original uploaded photo (base64)
+  referenceImage?: string;  // AI-generated clean reference face (base64) — used for consistency
   analysis: CharacterAnalysis | null;
   consistencyPrompt: string;
   createdAt: number;
@@ -66,7 +67,7 @@ export interface GeneratedContent {
   characterId: string;
   type: 'image' | 'video';
   prompt: string;
-  result: string; // URL or base64
+  result: string;
   sponsorship: {
     enabled: boolean;
     brand?: string;
@@ -94,6 +95,13 @@ const db = new Dexie('AIInfluencerDB') as Dexie & {
 };
 
 db.version(1).stores({
+  characters: 'id, name, createdAt, updatedAt',
+  generatedContent: 'id, characterId, type, createdAt',
+  aiProviders: 'id, provider, isActive',
+});
+
+// v2: adds referenceImage column (no index needed, just schema upgrade)
+db.version(2).stores({
   characters: 'id, name, createdAt, updatedAt',
   generatedContent: 'id, characterId, type, createdAt',
   aiProviders: 'id, provider, isActive',

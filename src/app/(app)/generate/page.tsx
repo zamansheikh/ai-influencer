@@ -5,7 +5,7 @@ import { v4 as uuid } from 'uuid';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Zap, Image as ImageIcon, Video, Megaphone, Copy, Check, Sparkles, ShoppingBag, Upload, X, Camera,
+  Zap, Image as ImageIcon, Video, Megaphone, Copy, Check, Sparkles, ShoppingBag, Upload, X, Camera, Info, Ban,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { db, type GeneratedContent } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { generateContent, type SponsorshipData } from '@/lib/ai-providers';
+import { getModelCapabilities, getUnavailableReason } from '@/lib/model-capabilities';
 import { copyToClipboard } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -40,8 +41,11 @@ export default function GeneratePage() {
   const [contentType, setContentType] = useState<'image' | 'video'>('image');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [resultType, setResultType] = useState<'image' | 'prompt'>('prompt');
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState('social');
+
+  const caps = activeProvider ? getModelCapabilities(activeProvider.model) : null;
 
   // Sponsorship
   const [sponsorBrand, setSponsorBrand] = useState('');
@@ -77,8 +81,16 @@ export default function GeneratePage() {
         ? { brand: sponsorBrand, product: sponsorProduct, description: sponsorDesc, productImages: productImages.length > 0 ? productImages : undefined }
         : undefined;
 
-      const res = await generateContent(activeProvider, selectedCharacter.consistencyPrompt, prompt, sponsorship);
+      const res = await generateContent({
+        provider: activeProvider,
+        consistencyPrompt: selectedCharacter.consistencyPrompt,
+        userPrompt: prompt,
+        referenceImage: selectedCharacter.referenceImage,
+        originalAvatar: selectedCharacter.avatar,
+        sponsorship,
+      });
       setResult(res.result || res.prompt);
+      setResultType(res.type || 'prompt');
 
       const content: GeneratedContent = {
         id: uuid(),
@@ -111,6 +123,32 @@ export default function GeneratePage() {
         <h1 className="text-xl sm:text-2xl font-bold">Generate Content</h1>
         <p className="text-xs sm:text-sm text-muted-foreground">Create photos and videos with your AI influencer characters</p>
       </div>
+
+      {/* Capability Banner */}
+      {activeProvider && caps && (
+        <div className="flex flex-wrap gap-2 text-[11px]">
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${caps.imageGeneration ? 'bg-success/10 border-success/20 text-success' : 'bg-muted border-border text-muted-foreground'}`}>
+            {caps.imageGeneration ? <Check className="w-3 h-3" /> : <Info className="w-3 h-3" />}
+            {caps.imageGeneration ? 'Image generation' : 'Prompt only (no image gen)'}
+          </div>
+          {caps.visionInput && selectedCharacter?.referenceImage && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success">
+              <Check className="w-3 h-3" /> Face ref will be sent
+            </div>
+          )}
+          {caps.visionInput && selectedCharacter && !selectedCharacter.referenceImage && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-primary/10 border-primary/20 text-primary">
+              <Info className="w-3 h-3" /> Original photo as face ref
+            </div>
+          )}
+          {!caps.visionInput && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-warning/10 border-warning/20 text-warning">
+              <Info className="w-3 h-3" /> No vision — text prompt only
+            </div>
+          )}
+          <span className="flex items-center text-muted-foreground px-1 text-[10px]">{caps.reasoning}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Left: Config */}
@@ -273,23 +311,32 @@ export default function GeneratePage() {
 
                 {/* Content type */}
                 <div className="flex gap-2">
-                  {[
-                    { type: 'image' as const, icon: ImageIcon, label: 'Photo' },
-                    { type: 'video' as const, icon: Video, label: 'Video' },
-                  ].map(({ type, icon: Icon, label }) => (
-                    <button
-                      key={type}
-                      onClick={() => setContentType(type)}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer border
-                        ${contentType === type ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
-                    >
-                      <Icon className="w-4 h-4" /> {label}
-                    </button>
-                  ))}
+                  <button
+                    onClick={() => setContentType('image')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer border
+                      ${contentType === 'image' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                  >
+                    <ImageIcon className="w-4 h-4" /> Photo
+                    {caps?.imageGeneration && <Badge variant="success" className="text-[9px] px-1.5 py-0">AI Gen</Badge>}
+                  </button>
+                  <button
+                    onClick={() => setContentType('video')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border relative
+                      ${contentType === 'video' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground'}
+                      ${caps && !caps.videoGeneration ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:text-foreground'}`}
+                    disabled={caps ? !caps.videoGeneration : false}
+                    title={caps && !caps.videoGeneration ? getUnavailableReason('videoGeneration', activeProvider?.model || '') : undefined}
+                  >
+                    <Video className="w-4 h-4" /> Video
+                    {caps && !caps.videoGeneration && <Ban className="w-3 h-3" />}
+                  </button>
                 </div>
+                {contentType === 'video' && caps && !caps.videoGeneration && (
+                  <p className="text-[11px] text-warning flex items-center gap-1"><Info className="w-3 h-3" /> {getUnavailableReason('videoGeneration', activeProvider?.model || '')}</p>
+                )}
 
                 <Button onClick={handleGenerate} loading={generating} className="w-full" size="lg" disabled={!selectedCharacter || !prompt.trim()}>
-                  <Zap className="w-5 h-5" /> {generating ? 'Generating...' : 'Generate Content'}
+                  <Zap className="w-5 h-5" /> {generating ? 'Generating...' : caps?.imageGeneration ? 'Generate Image' : 'Generate Prompt'}
                 </Button>
               </div>
             )}
@@ -317,7 +364,7 @@ export default function GeneratePage() {
                 </motion.div>
               ) : result ? (
                 <motion.div key="result" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-                  {result.startsWith('http') || result.startsWith('data:') ? (
+                  {(resultType === 'image' && (result.startsWith('http') || result.startsWith('data:'))) ? (
                     <img src={result} alt="Generated" className="w-full rounded-xl" />
                   ) : (
                     <div className="bg-secondary rounded-xl p-4 max-h-72 overflow-y-auto">
@@ -338,9 +385,17 @@ export default function GeneratePage() {
             {selectedCharacter && (
               <div className="mt-4 pt-3 border-t border-border flex items-center gap-2.5">
                 <img src={selectedCharacter.avatar} alt={selectedCharacter.name} className="w-9 h-9 rounded-lg object-cover" />
+                {selectedCharacter.referenceImage && (
+                  <div className="relative">
+                    <img src={selectedCharacter.referenceImage} alt="AI Ref" className="w-9 h-9 rounded-lg object-cover border border-primary/30" />
+                    <span className="absolute -top-1 -right-1 text-[7px] bg-primary text-white px-1 rounded-full">AI</span>
+                  </div>
+                )}
                 <div className="min-w-0">
                   <p className="text-xs font-medium truncate">{selectedCharacter.name}</p>
-                  <p className="text-[10px] text-muted-foreground">{selectedCharacter.analysis ? 'Analyzed' : 'No analysis'}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {selectedCharacter.referenceImage ? 'AI face ref' : selectedCharacter.analysis ? 'Original photo ref' : 'No analysis'}
+                  </p>
                 </div>
               </div>
             )}
