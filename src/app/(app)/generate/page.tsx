@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { v4 as uuid } from 'uuid';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Zap, Image as ImageIcon, Video, Megaphone, Copy, Check, Sparkles, ShoppingBag, Upload, X, Camera, Info, Ban,
+  Zap, Image as ImageIcon, Video, Megaphone, Copy, Check, Sparkles, ShoppingBag, Upload, X, Camera, Info, Ban, FileJson,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,7 +44,10 @@ export default function GeneratePage() {
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [resultType, setResultType] = useState<'image' | 'prompt'>('prompt');
+  const [fullPrompt, setFullPrompt] = useState<string | null>(null); // The complete prompt sent to AI
   const [copied, setCopied] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
   const [activeTab, setActiveTab] = useState('social');
 
   const caps = activeProvider ? getModelCapabilities(activeProvider.model) : null;
@@ -67,6 +70,20 @@ export default function GeneratePage() {
   const [sponsorProduct, setSponsorProduct] = useState('');
   const [sponsorDesc, setSponsorDesc] = useState('');
   const [productImages, setProductImages] = useState<string[]>([]);
+  const [previewPromptCopied, setPreviewPromptCopied] = useState(false);
+
+  // Live prompt preview — builds the full prompt in real-time
+  const livePrompt = useMemo(() => {
+    if (!selectedCharacter) return null;
+    let p = selectedCharacter.consistencyPrompt || '';
+    if (activeTab === 'sponsored' && sponsorBrand) {
+      p += `\n\nThe person is promoting ${sponsorBrand}'s ${sponsorProduct}. ${sponsorDesc}. Show the product naturally integrated into the scene.`;
+    }
+    if (prompt.trim()) {
+      p += `\n\nScene: ${prompt}`;
+    }
+    return p || null;
+  }, [selectedCharacter, prompt, activeTab, sponsorBrand, sponsorProduct, sponsorDesc]);
 
   const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -107,6 +124,8 @@ export default function GeneratePage() {
       });
       setResult(res.result || res.prompt);
       setResultType(res.type || 'prompt');
+      setFullPrompt(res.prompt);
+      setShowPrompt(true);
 
       const content: GeneratedContent = {
         id: uuid(),
@@ -414,15 +433,47 @@ export default function GeneratePage() {
           </Tabs>
         </div>
 
-        {/* Right: Result */}
-        <div>
+        {/* Right: Prompt Preview + Result */}
+        <div className="space-y-4">
+          {/* Live Prompt Preview — always visible when character + scene selected */}
+          {livePrompt && (
+            <Card>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-semibold flex items-center gap-1.5">
+                  <FileJson className="w-4 h-4 text-primary" />
+                  Prompt Preview
+                </h2>
+                <button
+                  onClick={async () => {
+                    const ok = await copyToClipboard(livePrompt);
+                    if (ok) { setPreviewPromptCopied(true); setTimeout(() => setPreviewPromptCopied(false), 2000); }
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                >
+                  {previewPromptCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  {previewPromptCopied ? 'Copied!' : 'Copy Prompt'}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                This is the full prompt that will be sent. Copy it to use in Midjourney, DALL-E, ComfyUI, etc.
+              </p>
+              <div className="bg-secondary rounded-xl p-3 max-h-40 overflow-y-auto">
+                <p className="text-[11px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono">{livePrompt}</p>
+              </div>
+              {!prompt.trim() && (
+                <p className="text-[10px] text-warning mt-2 flex items-center gap-1"><Info className="w-3 h-3" /> Type a scene description to complete the prompt</p>
+              )}
+            </Card>
+          )}
+
+          {/* Generated Output */}
           <Card className="lg:sticky lg:top-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold">Output</h2>
               {result && (
                 <button onClick={handleCopyResult} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">
                   {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {copied ? 'Copied' : 'Copy'}
+                  {copied ? 'Copied' : 'Copy Result'}
                 </button>
               )}
             </div>
@@ -453,6 +504,7 @@ export default function GeneratePage() {
               )}
             </AnimatePresence>
 
+            {/* Character info */}
             {selectedCharacter && (
               <div className="mt-4 pt-3 border-t border-border flex items-center gap-2.5">
                 <img src={selectedCharacter.avatar} alt={selectedCharacter.name} className="w-9 h-9 rounded-lg object-cover" />
@@ -471,6 +523,34 @@ export default function GeneratePage() {
               </div>
             )}
           </Card>
+
+          {/* Full Prompt Panel — always visible after generation */}
+          {fullPrompt && showPrompt && (
+            <Card>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-semibold flex items-center gap-1.5">
+                  <FileJson className="w-4 h-4 text-primary" />
+                  Full Prompt
+                </h2>
+                <button
+                  onClick={async () => {
+                    const ok = await copyToClipboard(fullPrompt);
+                    if (ok) { setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); }
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                >
+                  {promptCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  {promptCopied ? 'Copied!' : 'Copy Prompt'}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">
+                Use this prompt with any AI (Midjourney, DALL-E, ComfyUI, Stable Diffusion, etc.) to recreate the same result.
+              </p>
+              <div className="bg-secondary rounded-xl p-3 max-h-48 overflow-y-auto">
+                <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono">{fullPrompt}</p>
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </div>

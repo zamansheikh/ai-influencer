@@ -45,7 +45,9 @@ export default function CreateCharacterPage() {
   const [generating, setGenerating] = useState(false);
   const [genResult, setGenResult] = useState<string | null>(null);
   const [genResultType, setGenResultType] = useState<'image' | 'prompt'>('prompt');
+  const [genFullPrompt, setGenFullPrompt] = useState<string | null>(null);
   const [genCopied, setGenCopied] = useState(false);
+  const [genPromptCopied, setGenPromptCopied] = useState(false);
 
   const caps = activeProvider ? getModelCapabilities(activeProvider.model) : null;
 
@@ -132,6 +134,7 @@ export default function CreateCharacterPage() {
       });
       setGenResult(res.result || res.prompt);
       setGenResultType(res.type || 'prompt');
+      setGenFullPrompt(res.prompt);
       toast.success('Content generated!');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Generation failed');
@@ -395,34 +398,60 @@ export default function CreateCharacterPage() {
                   </Link>
                 </Card>
 
-                <Card>
-                  <h3 className="text-sm font-semibold mb-3">Output</h3>
-                  {generating ? (
-                    <div className="animate-shimmer w-full h-48 rounded-xl bg-secondary" />
-                  ) : genResult ? (
-                    <div>
-                      {(genResultType === 'image' && (genResult.startsWith('http') || genResult.startsWith('data:'))) ? (
-                        <img src={genResult} alt="Generated" className="w-full rounded-xl" />
-                      ) : (
-                        <div className="bg-secondary rounded-xl p-4 max-h-64 overflow-y-auto">
-                          <div className="flex items-center justify-between mb-2">
-                            <Badge>Generated Prompt</Badge>
-                            <button
-                              onClick={async () => { const ok = await copyToClipboard(genResult); if (ok) { setGenCopied(true); setTimeout(() => setGenCopied(false), 2000); } }}
-                              className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 cursor-pointer"
-                            >
-                              {genCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                              {genCopied ? 'Copied' : 'Copy'}
-                            </button>
+                <div className="space-y-4">
+                  <Card>
+                    <h3 className="text-sm font-semibold mb-3">Output</h3>
+                    {generating ? (
+                      <div className="animate-shimmer w-full h-48 rounded-xl bg-secondary" />
+                    ) : genResult ? (
+                      <div>
+                        {(genResultType === 'image' && (genResult.startsWith('http') || genResult.startsWith('data:'))) ? (
+                          <img src={genResult} alt="Generated" className="w-full rounded-xl" />
+                        ) : (
+                          <div className="bg-secondary rounded-xl p-4 max-h-64 overflow-y-auto">
+                            <div className="flex items-center justify-between mb-2">
+                              <Badge>AI Response</Badge>
+                              <button
+                                onClick={async () => { const ok = await copyToClipboard(genResult); if (ok) { setGenCopied(true); setTimeout(() => setGenCopied(false), 2000); } }}
+                                className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 cursor-pointer"
+                              >
+                                {genCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                {genCopied ? 'Copied' : 'Copy'}
+                              </button>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{genResult}</p>
                           </div>
-                          <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{genResult}</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <EmptyState icon={<ImageIcon className="w-8 h-8 text-primary/30" />} title="Ready" description="Generated content will appear here" />
+                        )}
+                      </div>
+                    ) : (
+                      <EmptyState icon={<ImageIcon className="w-8 h-8 text-primary/30" />} title="Ready" description="Generated content will appear here" />
+                    )}
+                  </Card>
+
+                  {/* Full prompt — for use in external tools */}
+                  {genFullPrompt && (
+                    <Card>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                          <Copy className="w-4 h-4 text-primary" /> Full Prompt
+                        </h3>
+                        <button
+                          onClick={async () => { const ok = await copyToClipboard(genFullPrompt); if (ok) { setGenPromptCopied(true); setTimeout(() => setGenPromptCopied(false), 2000); } }}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
+                        >
+                          {genPromptCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          {genPromptCopied ? 'Copied!' : 'Copy Prompt'}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mb-2">
+                        Use this with Midjourney, DALL-E, Stable Diffusion, or any AI to recreate the same character.
+                      </p>
+                      <div className="bg-secondary rounded-xl p-3 max-h-40 overflow-y-auto">
+                        <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono">{genFullPrompt}</p>
+                      </div>
+                    </Card>
                   )}
-                </Card>
+                </div>
               </motion.div>
             )}
           </motion.div>

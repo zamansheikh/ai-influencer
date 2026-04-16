@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Trash2, Copy, Zap, Clock, Check, Eye } from 'lucide-react';
+import { Trash2, Copy, Zap, Clock, Check, Eye, Download } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { copyToClipboard, getTimeAgo } from '@/lib/utils';
 import type { Character } from '@/lib/db';
@@ -12,10 +12,11 @@ interface CharacterCardProps {
   onSelect?: () => void;
   onDelete?: () => void;
   onGenerate?: () => void;
+  onExport?: () => void;
   index?: number;
 }
 
-export function CharacterCard({ character, onSelect, onDelete, onGenerate, index = 0 }: CharacterCardProps) {
+export function CharacterCard({ character, onSelect, onDelete, onGenerate, onExport, index = 0 }: CharacterCardProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -86,6 +87,13 @@ export function CharacterCard({ character, onSelect, onDelete, onGenerate, index
             title="Copy prompt"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onExport?.(); }}
+            className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors cursor-pointer"
+            title="Export"
+          >
+            <Download className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete?.(); }}
