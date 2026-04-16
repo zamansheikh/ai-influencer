@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { v4 as uuid } from 'uuid';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,6 +18,7 @@ import { db, type GeneratedContent } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { generateContent, type SponsorshipData } from '@/lib/ai-providers';
 import { getModelCapabilities, getUnavailableReason } from '@/lib/model-capabilities';
+import { ProviderSelector } from '@/components/features/provider-selector';
 import { copyToClipboard } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -46,6 +47,16 @@ export default function GeneratePage() {
   const [activeTab, setActiveTab] = useState('social');
 
   const caps = activeProvider ? getModelCapabilities(activeProvider.model) : null;
+
+  // Auto-switch content type based on model capabilities
+  useEffect(() => {
+    if (!caps) return;
+    if (caps.videoGeneration && !caps.imageGeneration) {
+      setContentType('video');
+    } else if (caps.imageGeneration && !caps.videoGeneration) {
+      setContentType('image');
+    }
+  }, [activeProvider?.id, caps?.videoGeneration, caps?.imageGeneration]);
 
   // Sponsorship
   const [sponsorBrand, setSponsorBrand] = useState('');
@@ -124,26 +135,43 @@ export default function GeneratePage() {
         <p className="text-xs sm:text-sm text-muted-foreground">Create photos and videos with your AI influencer characters</p>
       </div>
 
+      {/* Provider Selector */}
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+        <div className="flex-1">
+          <p className="text-[11px] text-muted-foreground mb-1 font-medium">AI Provider</p>
+          <ProviderSelector />
+        </div>
+        {!activeProvider && (
+          <Link href="/settings"><Button size="sm" variant="outline">Configure Provider</Button></Link>
+        )}
+      </div>
+
       {/* Capability Banner */}
       {activeProvider && caps && (
         <div className="flex flex-wrap gap-2 text-[11px]">
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${caps.imageGeneration ? 'bg-success/10 border-success/20 text-success' : 'bg-muted border-border text-muted-foreground'}`}>
-            {caps.imageGeneration ? <Check className="w-3 h-3" /> : <Info className="w-3 h-3" />}
-            {caps.imageGeneration ? 'Image generation' : 'Prompt only (no image gen)'}
-          </div>
-          {caps.visionInput && selectedCharacter?.referenceImage && (
+          {caps.imageGeneration && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success">
-              <Check className="w-3 h-3" /> Face ref will be sent
+              <Check className="w-3 h-3" /> Image generation
             </div>
           )}
-          {caps.visionInput && selectedCharacter && !selectedCharacter.referenceImage && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-primary/10 border-primary/20 text-primary">
-              <Info className="w-3 h-3" /> Original photo as face ref
+          {caps.videoGeneration && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success">
+              <Check className="w-3 h-3" /> Video generation
+            </div>
+          )}
+          {!caps.imageGeneration && !caps.videoGeneration && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-muted border-border text-muted-foreground">
+              <Info className="w-3 h-3" /> Prompt only (no media gen)
+            </div>
+          )}
+          {caps.visionInput && selectedCharacter && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success">
+              <Check className="w-3 h-3" /> {selectedCharacter.referenceImage ? 'AI face ref sent' : 'Photo ref sent'}
             </div>
           )}
           {!caps.visionInput && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-warning/10 border-warning/20 text-warning">
-              <Info className="w-3 h-3" /> No vision — text prompt only
+              <Info className="w-3 h-3" /> No vision — text only
             </div>
           )}
           <span className="flex items-center text-muted-foreground px-1 text-[10px]">{caps.reasoning}</span>
@@ -313,30 +341,36 @@ export default function GeneratePage() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => setContentType('image')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer border
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border
+                      ${!caps?.videoGeneration || caps?.imageGeneration ? 'cursor-pointer' : 'cursor-pointer'}
                       ${contentType === 'image' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
                   >
                     <ImageIcon className="w-4 h-4" /> Photo
                     {caps?.imageGeneration && <Badge variant="success" className="text-[9px] px-1.5 py-0">AI Gen</Badge>}
+                    {caps && !caps.imageGeneration && <span className="text-[9px] text-muted-foreground">(prompt)</span>}
                   </button>
                   <button
-                    onClick={() => setContentType('video')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border relative
+                    onClick={() => caps?.videoGeneration && setContentType('video')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border
                       ${contentType === 'video' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground'}
-                      ${caps && !caps.videoGeneration ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:text-foreground'}`}
-                    disabled={caps ? !caps.videoGeneration : false}
+                      ${caps?.videoGeneration ? 'cursor-pointer hover:text-foreground' : 'opacity-40 cursor-not-allowed'}`}
                     title={caps && !caps.videoGeneration ? getUnavailableReason('videoGeneration', activeProvider?.model || '') : undefined}
                   >
                     <Video className="w-4 h-4" /> Video
+                    {caps?.videoGeneration && <Badge variant="success" className="text-[9px] px-1.5 py-0">AI Gen</Badge>}
                     {caps && !caps.videoGeneration && <Ban className="w-3 h-3" />}
                   </button>
                 </div>
-                {contentType === 'video' && caps && !caps.videoGeneration && (
-                  <p className="text-[11px] text-warning flex items-center gap-1"><Info className="w-3 h-3" /> {getUnavailableReason('videoGeneration', activeProvider?.model || '')}</p>
+                {caps && !caps.videoGeneration && contentType === 'image' && !caps.imageGeneration && (
+                  <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Info className="w-3 h-3" /> This model generates text prompts only. Use the prompt with an image generator.</p>
                 )}
 
                 <Button onClick={handleGenerate} loading={generating} className="w-full" size="lg" disabled={!selectedCharacter || !prompt.trim()}>
-                  <Zap className="w-5 h-5" /> {generating ? 'Generating...' : caps?.imageGeneration ? 'Generate Image' : 'Generate Prompt'}
+                  <Zap className="w-5 h-5" />
+                  {generating ? 'Generating...'
+                    : contentType === 'video' && caps?.videoGeneration ? 'Generate Video'
+                    : caps?.imageGeneration ? 'Generate Image'
+                    : 'Generate Prompt'}
                 </Button>
               </div>
             )}

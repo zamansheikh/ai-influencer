@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ImageUpload } from '@/components/features/image-upload';
 import { AnalysisDisplay } from '@/components/features/analysis-display';
+import { ProviderSelector } from '@/components/features/provider-selector';
 import { db, type Character, type CharacterAnalysis } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { analyzeImage, generateReferenceImage, generateContent } from '@/lib/ai-providers';
@@ -231,16 +232,13 @@ export default function CreateCharacterPage() {
                 <Input label="Character Name" id="charName" placeholder="e.g., Luna Martinez" value={name} onChange={(e) => setName(e.target.value)} />
               </Card>
 
-              <Card className={`py-3 px-4 ${activeProvider ? 'border-success/20' : 'border-warning/20'}`}>
-                <div className="flex items-center gap-2 text-xs">
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${activeProvider ? 'bg-success' : 'bg-warning'}`} />
-                  {activeProvider ? (
-                    <span className="truncate">Using <strong>{activeProvider.name}</strong> ({activeProvider.model})</span>
-                  ) : (
-                    <span className="text-warning">No AI provider. <Link href="/settings" className="underline">Set up</Link></span>
-                  )}
-                </div>
-              </Card>
+              <div>
+                <p className="text-[11px] text-muted-foreground mb-1.5 font-medium">AI Provider</p>
+                <ProviderSelector />
+                {!activeProvider && (
+                  <p className="text-[11px] text-warning mt-1">No provider. <Link href="/settings" className="underline">Set up</Link></p>
+                )}
+              </div>
 
               {error && (
                 <Card className="border-destructive/30 bg-destructive/5 py-3 px-4">
