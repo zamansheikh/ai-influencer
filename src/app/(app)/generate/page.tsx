@@ -82,9 +82,7 @@ export default function GeneratePage() {
   const [swapExpression, setSwapExpression] = useState<SwapSource>('target');   // smile/expression
   const [swapOutfit, setSwapOutfit] = useState<SwapSource>('target');
   const [swapPose, setSwapPose] = useState<SwapSource>('target');
-  const [swapBackground, setSwapBackground] = useState<SwapSource>('target');
   const [swapCustomOutfit, setSwapCustomOutfit] = useState('');
-  const [swapCustomBackground, setSwapCustomBackground] = useState('');
 
   const handleSwapImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -100,58 +98,84 @@ export default function GeneratePage() {
   const livePrompt = useMemo(() => {
     if (!selectedCharacter) return null;
     const parts: string[] = [];
+    const isSwap = activeTab === 'swap';
+    const hasSwapTarget = isSwap && !!swapImage;
 
-    if (hasRefImage && caps?.visionInput) {
-      parts.push(`[FACE REFERENCE PHOTO ATTACHED] — Match this face EXACTLY: same bone structure, same eyes, same nose, same lips, same jawline, same skin tone. The photo is the absolute source of truth. Do NOT alter any facial feature.`);
-      parts.push(`[SUPPLEMENTARY TEXT DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
-    } else {
-      parts.push(`[CHARACTER DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
+    // ── IMAGE ORDER GUIDE (always first so external tools know which image is which) ──
+    if (hasRefImage) {
+      const imageGuide: string[] = ['[IMAGE ORDER — READ THIS FIRST]'];
+      imageGuide.push('IMAGE 1 (first attached image): INFLUENCER FACE REFERENCE — This is the person whose face to use. This face is the identity. Match it exactly in the output.');
+      if (hasSwapTarget) {
+        imageGuide.push('IMAGE 2 (second attached image): TARGET IMAGE — This is the reference to swap from. Copy outfit/pose/scene/expression from this image as instructed below.');
+      }
+      if (activeTab === 'sponsored' && productImages.length > 0) {
+        imageGuide.push(`IMAGE ${hasSwapTarget ? '3+' : '2+'}: PRODUCT REFERENCE PHOTOS — Product images for sponsorship placement.`);
+      }
+      imageGuide.push('When uploading to any AI tool, always upload the influencer face photo FIRST, then the target/product images after.');
+      parts.push(imageGuide.join('\n'));
     }
 
-    if (activeTab === 'swap') {
+    // ── FACE REFERENCE ──
+    if (hasRefImage) {
+      parts.push(`[INFLUENCER FACE — IMAGE 1]\nThe first image is the influencer\'s face. Match this face EXACTLY in the output: same bone structure, same eyes, same nose, same lips, same jawline, same skin tone. This face is the absolute source of truth. Do NOT alter any facial feature.`);
+      parts.push(`[SUPPLEMENTARY TEXT DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
+    } else {
+      parts.push(`[CHARACTER DESCRIPTION — no reference photo]\n${selectedCharacter.consistencyPrompt || ''}`);
+    }
+
+    // ── SWAP INSTRUCTIONS ──
+    if (isSwap) {
       const swapLines: string[] = ['[SWAP / TRANSFER MODE]'];
-      if (swapImage) swapLines.push('[TARGET IMAGE ATTACHED]');
-      swapLines.push('Recreate the target image with these specific rules:');
+      if (hasSwapTarget) {
+        swapLines.push('The second image (IMAGE 2) is the TARGET to swap from.');
+      }
+      swapLines.push('Apply these rules:');
 
-      // Face — always influencer
-      swapLines.push('FACE: ALWAYS use the INFLUENCER\'s face (from reference photo). Replace the face in the target image. Match bone structure, eyes, nose, lips, skin tone exactly from the influencer reference. The face identity must be the influencer.');
+      swapLines.push('FACE: ALWAYS use the INFLUENCER\'s face from IMAGE 1. The face identity must be the influencer. Never use the target\'s face.');
 
-      // Expression / Smile
       swapLines.push(swapExpression === 'target'
-        ? 'EXPRESSION: Copy the EXACT facial expression, smile, and emotion from the TARGET image. The influencer\'s face should show the same smile/expression as the person in the target.'
-        : 'EXPRESSION: Use the INFLUENCER\'s natural expression. Do NOT copy the smile or expression from the target image.');
+        ? 'EXPRESSION: Copy the facial expression, smile, and emotion from the TARGET (IMAGE 2). The influencer\'s face should show the same expression as the person in the target.'
+        : 'EXPRESSION: Use the INFLUENCER\'s natural expression. Ignore the target\'s expression.');
 
-      // Outfit
-      if (swapOutfit === 'target') swapLines.push('OUTFIT: Copy the EXACT outfit/clothing from the TARGET image. Replicate every detail — fabric, color, pattern, accessories.');
-      else if (swapOutfit === 'custom' && swapCustomOutfit) swapLines.push(`OUTFIT: Dress the person in: ${swapCustomOutfit}`);
-      else swapLines.push('OUTFIT: Use the INFLUENCER\'s default/signature style. Do NOT copy the outfit from the target image.');
+      if (swapOutfit === 'target') swapLines.push('OUTFIT: Copy the EXACT outfit/clothing from the TARGET (IMAGE 2). Replicate fabric, color, pattern, accessories.');
+      else if (swapOutfit === 'custom' && swapCustomOutfit) swapLines.push(`OUTFIT: ${swapCustomOutfit}`);
+      else swapLines.push('OUTFIT: Use the INFLUENCER\'s signature style. Ignore target outfit.');
 
-      // Pose
       swapLines.push(swapPose === 'target'
-        ? 'POSE: Match the EXACT body pose, position, and gesture from the TARGET image.'
-        : 'POSE: Use a natural, comfortable pose. Do NOT copy the pose from the target image.');
+        ? 'POSE: Match the EXACT body pose and gesture from the TARGET (IMAGE 2).'
+        : 'POSE: Use a natural pose. Ignore target pose.');
 
-      // Background
-      if (swapBackground === 'target') swapLines.push('BACKGROUND: Keep the EXACT scene/background/setting from the TARGET image.');
-      else if (swapBackground === 'custom' && swapCustomBackground) swapLines.push(`BACKGROUND: ${swapCustomBackground}`);
-      else swapLines.push('BACKGROUND: AI decides the background. Do NOT copy from the target image.');
+      // Background / Scene — controlled by the scene toggle
+      if (swapSceneEnabled && prompt.trim()) {
+        swapLines.push(`BACKGROUND/SCENE: Use this custom scene instead of the target background: ${prompt}`);
+      } else {
+        swapLines.push('BACKGROUND/SCENE: Keep the EXACT scene/background/setting from the TARGET (IMAGE 2).');
+      }
 
       parts.push(swapLines.join('\n'));
     }
+
+    // ── SPONSORSHIP ──
     if (activeTab === 'sponsored' && sponsorBrand) {
       parts.push(`[SPONSORSHIP] Promoting ${sponsorBrand}'s ${sponsorProduct}. ${sponsorDesc}. Show product naturally integrated.`);
     }
+
+    // ── SCENE ──
     if (prompt.trim()) {
       parts.push(`[SCENE] ${prompt}`);
     }
+
+    // ── ASPECT RATIO ──
     if (selectedRatio) {
-      parts.push(`[ASPECT RATIO] ${selectedRatio.ratio} (${selectedRatio.width}x${selectedRatio.height}) — ${selectedRatio.platform} ${selectedRatio.label}. Frame the composition for this exact aspect ratio.`);
+      parts.push(`[ASPECT RATIO] ${selectedRatio.ratio} (${selectedRatio.width}x${selectedRatio.height}) — ${selectedRatio.platform} ${selectedRatio.label}.`);
     }
-    if (hasRefImage && caps?.visionInput) {
-      parts.push(`[REMINDER] The face in the reference photo is the IDENTITY. Clothing, background, pose can change — but the FACE must remain identical.`);
+
+    // ── FINAL REMINDER ──
+    if (hasRefImage) {
+      parts.push(`[REMINDER] IMAGE 1 = influencer face = the identity. Always preserve this face exactly. Everything else (outfit, pose, background, expression) follows the rules above.`);
     }
     return parts.join('\n\n') || null;
-  }, [selectedCharacter, prompt, activeTab, sponsorBrand, sponsorProduct, sponsorDesc, hasRefImage, caps?.visionInput, selectedRatio, swapImage, swapExpression, swapOutfit, swapPose, swapBackground, swapCustomOutfit, swapCustomBackground]);
+  }, [selectedCharacter, prompt, activeTab, sponsorBrand, sponsorProduct, sponsorDesc, hasRefImage, selectedRatio, swapImage, swapExpression, swapOutfit, swapPose, swapSceneEnabled, swapCustomOutfit, productImages.length]);
 
   const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -189,7 +213,7 @@ export default function GeneratePage() {
         sp.push(swapExpression === 'target' ? 'EXPRESSION: Copy target smile/expression.' : 'EXPRESSION: Use influencer natural expression.');
         sp.push(swapOutfit === 'target' ? 'OUTFIT: Copy exact outfit from target.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Use influencer style.');
         sp.push(swapPose === 'target' ? 'POSE: Match target pose exactly.' : 'POSE: Natural pose.');
-        sp.push(swapBackground === 'target' ? 'BACKGROUND: Keep target background.' : swapBackground === 'custom' && swapCustomBackground ? `BACKGROUND: ${swapCustomBackground}` : 'BACKGROUND: AI decides.');
+        sp.push(swapSceneEnabled && prompt.trim() ? `BACKGROUND: ${prompt}` : 'BACKGROUND: Keep target background.');
         if (prompt) sp.push(`Additional: ${prompt}`);
         userPrompt = sp.join(' ');
       }
@@ -337,17 +361,17 @@ export default function GeneratePage() {
                           onChange={(e) => setSwapSceneEnabled(e.target.checked)}
                           className="w-3.5 h-3.5 rounded border-border accent-primary"
                         />
-                        <span className="text-xs font-medium">Scene Description & Presets</span>
+                        <span className="text-xs font-medium">Custom Background / Scene</span>
                       </label>
-                      <span className="text-[10px] text-muted-foreground">{swapSceneEnabled ? 'Enabled' : 'Disabled — using target image as scene'}</span>
+                      <span className="text-[10px] text-muted-foreground">{swapSceneEnabled ? 'Custom scene — overrides target background' : 'Using target image background'}</span>
                     </div>
                   )}
                   {(tab !== 'swap' || swapSceneEnabled) && (
                     <>
                       <Textarea
-                        label={tab === 'swap' ? 'Additional Scene / Instructions' : 'Scene Description'}
+                        label={tab === 'swap' ? 'Custom Background / Scene' : 'Scene Description'}
                         id="prompt"
-                        placeholder={tab === 'swap' ? 'Override scene, add extra instructions...' : 'Describe the scene, pose, setting, mood...'}
+                        placeholder={tab === 'swap' ? 'e.g., sunset beach, modern office, Dhaka rooftop...' : 'Describe the scene, pose, setting, mood...'}
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         rows={tab === 'swap' ? 2 : 3}
@@ -459,22 +483,21 @@ export default function GeneratePage() {
                         ]}
                       />
 
-                      {/* BACKGROUND */}
-                      <SwapRow
-                        icon={<MapPin className="w-3.5 h-3.5" />}
-                        label="Background"
-                        value={swapBackground}
-                        onChange={setSwapBackground}
-                        options={[
-                          { id: 'target', label: 'From target image' },
-                          { id: 'influencer', label: 'AI decides' },
-                          { id: 'custom', label: 'Custom' },
-                        ]}
-                        customValue={swapCustomBackground}
-                        onCustomChange={setSwapCustomBackground}
-                        customPlaceholder="e.g., sunset beach, modern office"
-                        last
-                      />
+                      {/* BACKGROUND — controlled by the scene toggle above */}
+                      <div>
+                        <p className="text-[11px] font-medium mb-1.5 flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5" /> Background / Scene</p>
+                        <div className="flex gap-1.5">
+                          <div className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-medium text-center border
+                            ${!swapSceneEnabled ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-secondary border-transparent text-muted-foreground'}`}>
+                            {swapSceneEnabled ? 'Overridden by custom scene above' : 'From target image'}
+                          </div>
+                        </div>
+                        <p className="text-[9px] text-muted-foreground mt-1">
+                          {swapSceneEnabled
+                            ? 'Enable the "Custom Background / Scene" toggle above to change the background.'
+                            : 'Toggle "Custom Background / Scene" above to use a different background instead of the target\'s.'}
+                        </p>
+                      </div>
                     </Card>
 
                     {/* Aspect ratio */}
