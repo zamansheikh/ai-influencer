@@ -238,6 +238,7 @@ async function analyzeWithQwen(provider: AIProvider, imageBase64: string) {
     { Authorization: `Bearer ${provider.apiKey}` },
     {
       model,
+      stream: false,
       messages: [
         { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
         {
@@ -370,6 +371,7 @@ async function generateWithQwen(provider: AIProvider, prompt: string) {
     { Authorization: `Bearer ${provider.apiKey}` },
     {
       model,
+      stream: false,
       messages: [
         {
           role: 'user',
