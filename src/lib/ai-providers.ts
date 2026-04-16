@@ -318,10 +318,11 @@ export interface GenerateOptions {
   originalAvatar?: string;    // original uploaded photo
   sponsorship?: SponsorshipData;
   forceTextOnly?: boolean;    // Force text prompt output even if model can gen images
+  swapImage?: string;         // Target image for face/outfit/scene swap
 }
 
 export async function generateContent(opts: GenerateOptions) {
-  const { provider, consistencyPrompt, userPrompt, referenceImage, originalAvatar, sponsorship, forceTextOnly } = opts;
+  const { provider, consistencyPrompt, userPrompt, referenceImage, originalAvatar, sponsorship, forceTextOnly, swapImage } = opts;
   const caps = getModelCapabilities(provider.model);
   const hasRefImage = !!(referenceImage || originalAvatar);
 
@@ -359,11 +360,13 @@ export async function generateContent(opts: GenerateOptions) {
 
   const fullPrompt = promptParts.join('\n\n');
 
-  // Collect reference images
+  // Collect reference images: face ref first, then swap target, then product photos
   const images: string[] = [];
   if (caps.visionInput) {
     if (referenceImage) images.push(referenceImage);
     else if (originalAvatar) images.push(originalAvatar);
+    // Swap target image (the image to swap face/outfit/scene from)
+    if (swapImage) images.push(swapImage);
   }
   if (caps.multiImageInput && sponsorship?.productImages) {
     images.push(...sponsorship.productImages);
@@ -391,13 +394,17 @@ async function genWithGemini(provider: AIProvider, prompt: string, images: strin
 
   // Face reference image FIRST — so the model sees it before the text
   if (images.length > 0) {
-    parts.push({ text: 'FACE REFERENCE PHOTO — this is the person. Match this face EXACTLY in the generated image:' });
+    parts.push({ text: 'IMAGE 1 — FACE REFERENCE: This is the person\'s face. Match this face EXACTLY:' });
     const { data: faceData, mimeType: faceMime } = extractBase64(images[0]);
     parts.push({ inlineData: { mimeType: faceMime, data: faceData } });
 
-    // Additional images (product photos etc.)
+    // Additional images: swap target, product photos
     for (let i = 1; i < images.length; i++) {
       const { data, mimeType } = extractBase64(images[i]);
+      // Label the swap target image if it's the second image and swap is active
+      if (i === 1 && prompt.includes('SWAP')) {
+        parts.push({ text: 'IMAGE 2 — SWAP TARGET: The image to swap face/outfit/scene from:' });
+      }
       parts.push({ inlineData: { mimeType, data } });
     }
   }

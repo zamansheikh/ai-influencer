@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Zap, Image as ImageIcon, Video, Megaphone, Copy, Check, Sparkles, ShoppingBag, Upload, X, Camera, Info, Ban, FileJson,
+  Repeat, Shirt, MapPin, User, Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,8 +28,15 @@ import Link from 'next/link';
 
 const contentTabs = [
   { id: 'social', label: 'Social Media', icon: <ImageIcon className="w-4 h-4" /> },
+  { id: 'swap', label: 'Swap', icon: <Repeat className="w-4 h-4" /> },
   { id: 'sponsored', label: 'Sponsored', icon: <Megaphone className="w-4 h-4" /> },
 ];
+
+// Each swap aspect: where does it come from?
+// "target" = copy from the uploaded target image
+// "influencer" = use the influencer's own (default appearance / AI decides)
+// "custom" = user provides a text description
+type SwapSource = 'target' | 'influencer' | 'custom';
 
 export default function GeneratePage() {
   const { characters, selectedCharacter, setSelectedCharacter, activeProvider } = useAppStore();
@@ -67,6 +75,26 @@ export default function GeneratePage() {
   const [previewPromptCopied, setPreviewPromptCopied] = useState(false);
   const [selectedRatio, setSelectedRatio] = useState<AspectRatio | null>(null);
 
+  // Swap state — independent aspects, each from target or influencer
+  const [swapImage, setSwapImage] = useState<string | null>(null);
+  const [swapSceneEnabled, setSwapSceneEnabled] = useState(false);
+  // Face is ALWAYS influencer — no toggle needed
+  const [swapExpression, setSwapExpression] = useState<SwapSource>('target');   // smile/expression
+  const [swapOutfit, setSwapOutfit] = useState<SwapSource>('target');
+  const [swapPose, setSwapPose] = useState<SwapSource>('target');
+  const [swapBackground, setSwapBackground] = useState<SwapSource>('target');
+  const [swapCustomOutfit, setSwapCustomOutfit] = useState('');
+  const [swapCustomBackground, setSwapCustomBackground] = useState('');
+
+  const handleSwapImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setSwapImage(reader.result as string);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   // Live prompt preview — builds the full prompt in real-time
   const hasRefImage = !!(selectedCharacter?.referenceImage || selectedCharacter?.avatar);
   const livePrompt = useMemo(() => {
@@ -80,6 +108,36 @@ export default function GeneratePage() {
       parts.push(`[CHARACTER DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
     }
 
+    if (activeTab === 'swap') {
+      const swapLines: string[] = ['[SWAP / TRANSFER MODE]'];
+      if (swapImage) swapLines.push('[TARGET IMAGE ATTACHED]');
+      swapLines.push('Recreate the target image with these specific rules:');
+
+      // Face — always influencer
+      swapLines.push('FACE: ALWAYS use the INFLUENCER\'s face (from reference photo). Replace the face in the target image. Match bone structure, eyes, nose, lips, skin tone exactly from the influencer reference. The face identity must be the influencer.');
+
+      // Expression / Smile
+      swapLines.push(swapExpression === 'target'
+        ? 'EXPRESSION: Copy the EXACT facial expression, smile, and emotion from the TARGET image. The influencer\'s face should show the same smile/expression as the person in the target.'
+        : 'EXPRESSION: Use the INFLUENCER\'s natural expression. Do NOT copy the smile or expression from the target image.');
+
+      // Outfit
+      if (swapOutfit === 'target') swapLines.push('OUTFIT: Copy the EXACT outfit/clothing from the TARGET image. Replicate every detail — fabric, color, pattern, accessories.');
+      else if (swapOutfit === 'custom' && swapCustomOutfit) swapLines.push(`OUTFIT: Dress the person in: ${swapCustomOutfit}`);
+      else swapLines.push('OUTFIT: Use the INFLUENCER\'s default/signature style. Do NOT copy the outfit from the target image.');
+
+      // Pose
+      swapLines.push(swapPose === 'target'
+        ? 'POSE: Match the EXACT body pose, position, and gesture from the TARGET image.'
+        : 'POSE: Use a natural, comfortable pose. Do NOT copy the pose from the target image.');
+
+      // Background
+      if (swapBackground === 'target') swapLines.push('BACKGROUND: Keep the EXACT scene/background/setting from the TARGET image.');
+      else if (swapBackground === 'custom' && swapCustomBackground) swapLines.push(`BACKGROUND: ${swapCustomBackground}`);
+      else swapLines.push('BACKGROUND: AI decides the background. Do NOT copy from the target image.');
+
+      parts.push(swapLines.join('\n'));
+    }
     if (activeTab === 'sponsored' && sponsorBrand) {
       parts.push(`[SPONSORSHIP] Promoting ${sponsorBrand}'s ${sponsorProduct}. ${sponsorDesc}. Show product naturally integrated.`);
     }
@@ -93,7 +151,7 @@ export default function GeneratePage() {
       parts.push(`[REMINDER] The face in the reference photo is the IDENTITY. Clothing, background, pose can change — but the FACE must remain identical.`);
     }
     return parts.join('\n\n') || null;
-  }, [selectedCharacter, prompt, activeTab, sponsorBrand, sponsorProduct, sponsorDesc, hasRefImage, caps?.visionInput, selectedRatio]);
+  }, [selectedCharacter, prompt, activeTab, sponsorBrand, sponsorProduct, sponsorDesc, hasRefImage, caps?.visionInput, selectedRatio, swapImage, swapExpression, swapOutfit, swapPose, swapBackground, swapCustomOutfit, swapCustomBackground]);
 
   const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -114,7 +172,7 @@ export default function GeneratePage() {
 
   const handleGenerate = async () => {
     if (!selectedCharacter) { toast.error('Select a character first'); return; }
-    if (!prompt.trim()) { toast.error('Enter a prompt'); return; }
+    if (activeTab !== 'swap' && !prompt.trim()) { toast.error('Enter a prompt'); return; }
     if (!activeProvider) { toast.error('Configure an AI provider in Settings'); return; }
 
     setGenerating(true);
@@ -123,14 +181,28 @@ export default function GeneratePage() {
         ? { brand: sponsorBrand, product: sponsorProduct, description: sponsorDesc, productImages: productImages.length > 0 ? productImages : undefined }
         : undefined;
 
+      // Build swap-aware prompt
+      let userPrompt = prompt;
+      if (activeTab === 'swap') {
+        const sp: string[] = ['Recreate the target image with these rules:'];
+        sp.push('FACE: Always use influencer face from reference.');
+        sp.push(swapExpression === 'target' ? 'EXPRESSION: Copy target smile/expression.' : 'EXPRESSION: Use influencer natural expression.');
+        sp.push(swapOutfit === 'target' ? 'OUTFIT: Copy exact outfit from target.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Use influencer style.');
+        sp.push(swapPose === 'target' ? 'POSE: Match target pose exactly.' : 'POSE: Natural pose.');
+        sp.push(swapBackground === 'target' ? 'BACKGROUND: Keep target background.' : swapBackground === 'custom' && swapCustomBackground ? `BACKGROUND: ${swapCustomBackground}` : 'BACKGROUND: AI decides.');
+        if (prompt) sp.push(`Additional: ${prompt}`);
+        userPrompt = sp.join(' ');
+      }
+
       const res = await generateContent({
         provider: activeProvider,
         consistencyPrompt: selectedCharacter.consistencyPrompt,
-        userPrompt: prompt,
+        userPrompt,
         referenceImage: selectedCharacter.referenceImage,
         originalAvatar: selectedCharacter.avatar,
         sponsorship,
         forceTextOnly: outputFormat === 'prompt',
+        swapImage: activeTab === 'swap' && swapImage ? swapImage : undefined,
       });
       setResult(res.result || res.prompt);
       setResultType(res.type || 'prompt');
@@ -254,22 +326,163 @@ export default function GeneratePage() {
           <Tabs tabs={contentTabs} defaultTab="social" onChange={setActiveTab}>
             {(tab) => (
               <div className="space-y-4">
+                {/* Scene description — always for social/sponsored, toggleable for swap */}
                 <Card>
-                  <Textarea
-                    label="Scene Description"
-                    id="prompt"
-                    placeholder="Describe the scene, pose, setting, mood..."
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    rows={3}
-                  />
-                  <div className="mt-3">
-                    <ScenePicker onSelect={setPrompt} />
-                  </div>
-                  <div className="mt-4 pt-4 border-t border-border">
-                    <RatioPicker selected={selectedRatio} onSelect={setSelectedRatio} />
-                  </div>
+                  {tab === 'swap' && (
+                    <div className="flex items-center justify-between mb-3">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={swapSceneEnabled}
+                          onChange={(e) => setSwapSceneEnabled(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded border-border accent-primary"
+                        />
+                        <span className="text-xs font-medium">Scene Description & Presets</span>
+                      </label>
+                      <span className="text-[10px] text-muted-foreground">{swapSceneEnabled ? 'Enabled' : 'Disabled — using target image as scene'}</span>
+                    </div>
+                  )}
+                  {(tab !== 'swap' || swapSceneEnabled) && (
+                    <>
+                      <Textarea
+                        label={tab === 'swap' ? 'Additional Scene / Instructions' : 'Scene Description'}
+                        id="prompt"
+                        placeholder={tab === 'swap' ? 'Override scene, add extra instructions...' : 'Describe the scene, pose, setting, mood...'}
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        rows={tab === 'swap' ? 2 : 3}
+                      />
+                      <div className="mt-3">
+                        <ScenePicker onSelect={setPrompt} />
+                      </div>
+                    </>
+                  )}
+                  {tab !== 'swap' && (
+                    <div className="mt-4 pt-4 border-t border-border">
+                      <RatioPicker selected={selectedRatio} onSelect={setSelectedRatio} />
+                    </div>
+                  )}
                 </Card>
+
+                {/* ── Swap Mode ── */}
+                {tab === 'swap' && (
+                  <>
+                    {/* Upload target */}
+                    <Card glow>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Repeat className="w-4 h-4 text-primary" />
+                        <h3 className="text-sm font-semibold">Swap / Transfer</h3>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mb-3">
+                        Upload a reference image. Choose what to take from it vs your influencer.
+                      </p>
+
+                      {swapImage ? (
+                        <div className="relative group rounded-xl overflow-hidden">
+                          <img src={swapImage} alt="Swap target" className="w-full h-48 object-cover rounded-xl" />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                            <button onClick={() => setSwapImage(null)} className="opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-destructive rounded-full cursor-pointer">
+                              <X className="w-4 h-4 text-white" />
+                            </button>
+                          </div>
+                          <Badge className="absolute top-2 left-2">Target Image</Badge>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center gap-3 py-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer">
+                          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                            <Upload className="w-6 h-6 text-primary/60" />
+                          </div>
+                          <p className="text-xs font-medium">Upload target image</p>
+                          <input type="file" accept="image/*,video/*" className="hidden" onChange={handleSwapImageUpload} />
+                        </label>
+                      )}
+                      {!caps?.visionInput && (
+                        <p className="text-[10px] text-warning mt-2 flex items-center gap-1">
+                          <Info className="w-3 h-3 shrink-0" /> {activeProvider?.model} has no vision — only text prompt will be generated.
+                        </p>
+                      )}
+                    </Card>
+
+                    {/* 4 independent swap controls */}
+                    <Card>
+                      <h3 className="text-xs font-semibold mb-1">What to use from where?</h3>
+                      <p className="text-[10px] text-muted-foreground mb-4">For each aspect, choose: copy from the <strong>target image</strong>, use the <strong>influencer&apos;s own</strong>, or write <strong>custom</strong>.</p>
+
+                      {/* FACE — always influencer, no toggle */}
+                      <div className="mb-3 pb-3 border-b border-border">
+                        <p className="text-[11px] font-medium mb-1.5 flex items-center gap-1.5"><User className="w-3.5 h-3.5" /> Face</p>
+                        <div className="flex gap-1.5">
+                          <div className="flex-1 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-primary/10 border border-primary/30 text-primary text-center">
+                            Always Influencer
+                          </div>
+                        </div>
+                        <p className="text-[9px] text-muted-foreground mt-1">Face identity is always your influencer character — this cannot be changed.</p>
+                      </div>
+
+                      {/* EXPRESSION / SMILE */}
+                      <SwapRow
+                        icon={<Sparkles className="w-3.5 h-3.5" />}
+                        label="Expression / Smile"
+                        value={swapExpression}
+                        onChange={setSwapExpression}
+                        options={[
+                          { id: 'target', label: 'Copy target expression' },
+                          { id: 'influencer', label: 'Influencer natural' },
+                        ]}
+                      />
+
+                      {/* OUTFIT */}
+                      <SwapRow
+                        icon={<Shirt className="w-3.5 h-3.5" />}
+                        label="Outfit"
+                        value={swapOutfit}
+                        onChange={setSwapOutfit}
+                        options={[
+                          { id: 'target', label: 'From target image' },
+                          { id: 'influencer', label: 'Influencer style' },
+                          { id: 'custom', label: 'Custom' },
+                        ]}
+                        customValue={swapCustomOutfit}
+                        onCustomChange={setSwapCustomOutfit}
+                        customPlaceholder="e.g., red silk dress, gold jewelry"
+                      />
+
+                      {/* POSE */}
+                      <SwapRow
+                        icon={<Layers className="w-3.5 h-3.5" />}
+                        label="Pose"
+                        value={swapPose}
+                        onChange={setSwapPose}
+                        options={[
+                          { id: 'target', label: 'Copy target pose' },
+                          { id: 'influencer', label: 'Natural / AI decides' },
+                        ]}
+                      />
+
+                      {/* BACKGROUND */}
+                      <SwapRow
+                        icon={<MapPin className="w-3.5 h-3.5" />}
+                        label="Background"
+                        value={swapBackground}
+                        onChange={setSwapBackground}
+                        options={[
+                          { id: 'target', label: 'From target image' },
+                          { id: 'influencer', label: 'AI decides' },
+                          { id: 'custom', label: 'Custom' },
+                        ]}
+                        customValue={swapCustomBackground}
+                        onCustomChange={setSwapCustomBackground}
+                        customPlaceholder="e.g., sunset beach, modern office"
+                        last
+                      />
+                    </Card>
+
+                    {/* Aspect ratio */}
+                    <Card>
+                      <RatioPicker selected={selectedRatio} onSelect={setSelectedRatio} />
+                    </Card>
+                  </>
+                )}
 
                 {tab === 'sponsored' && (
                   <Card glow>
@@ -423,7 +636,8 @@ export default function GeneratePage() {
                   )}
                 </div>
 
-                <Button onClick={handleGenerate} loading={generating} className="w-full" size="lg" disabled={!selectedCharacter || !prompt.trim()}>
+                <Button onClick={handleGenerate} loading={generating} className="w-full" size="lg"
+                  disabled={!selectedCharacter || (activeTab !== 'swap' && !prompt.trim())}>
                   <Zap className="w-5 h-5" />
                   {generating ? 'Generating...'
                     : outputFormat === 'prompt' ? 'Generate Prompt'
@@ -462,7 +676,7 @@ export default function GeneratePage() {
               <div className="bg-secondary rounded-xl p-3 max-h-40 overflow-y-auto">
                 <p className="text-[11px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono">{livePrompt}</p>
               </div>
-              {!prompt.trim() && (
+              {!prompt.trim() && activeTab !== 'swap' && (
                 <p className="text-[10px] text-warning mt-2 flex items-center gap-1"><Info className="w-3 h-3" /> Type a scene description to complete the prompt</p>
               )}
             </Card>
@@ -555,6 +769,46 @@ export default function GeneratePage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Reusable row for swap controls — each aspect (face, outfit, pose, bg)
+function SwapRow({ icon, label, value, onChange, options, customValue, onCustomChange, customPlaceholder, last }: {
+  icon: React.ReactNode;
+  label: string;
+  value: SwapSource;
+  onChange: (v: SwapSource) => void;
+  options: { id: SwapSource; label: string }[];
+  customValue?: string;
+  onCustomChange?: (v: string) => void;
+  customPlaceholder?: string;
+  last?: boolean;
+}) {
+  return (
+    <div className={last ? '' : 'mb-3 pb-3 border-b border-border'}>
+      <p className="text-[11px] font-medium mb-1.5 flex items-center gap-1.5">{icon} {label}</p>
+      <div className="flex gap-1.5">
+        {options.map((opt) => (
+          <button
+            key={opt.id}
+            onClick={() => onChange(opt.id)}
+            className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all cursor-pointer border text-center
+              ${value === opt.id ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-secondary border-transparent text-muted-foreground hover:text-foreground'}`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      {value === 'custom' && onCustomChange && (
+        <input
+          type="text"
+          placeholder={customPlaceholder}
+          value={customValue || ''}
+          onChange={(e) => onCustomChange(e.target.value)}
+          className="w-full mt-2 h-8 px-3 rounded-lg bg-input border border-border text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      )}
     </div>
   );
 }
