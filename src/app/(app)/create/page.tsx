@@ -375,7 +375,7 @@ export default function CreateCharacterPage() {
 
                   <Textarea id="genPrompt" placeholder="Describe the scene, pose, setting..." value={genPrompt} onChange={(e) => setGenPrompt(e.target.value)} rows={3} />
                   <div className="mt-3">
-                    <ScenePicker onSelect={setGenPrompt} />
+                    <ScenePicker onSelect={(preset) => setGenPrompt(preset.scene)} />
                   </div>
                   <Button onClick={handleGenerate} loading={generating} disabled={!genPrompt.trim()} className="w-full mt-4">
                     <Zap className="w-4 h-4" /> {generating ? 'Generating...' : caps?.imageGeneration ? 'Generate Image' : 'Generate Prompt'}

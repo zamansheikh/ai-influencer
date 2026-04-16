@@ -15,15 +15,16 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/ui/empty-state';
-import { db, type GeneratedContent } from '@/lib/db';
+import { db } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { generateContent, type SponsorshipData } from '@/lib/ai-providers';
-import { getModelCapabilities, getUnavailableReason } from '@/lib/model-capabilities';
+import { getModelCapabilities } from '@/lib/model-capabilities';
 import { ProviderSelector } from '@/components/features/provider-selector';
 import { copyToClipboard } from '@/lib/utils';
 import { ScenePicker } from '@/components/features/scene-picker';
 import { RatioPicker } from '@/components/features/ratio-picker';
 import type { AspectRatio } from '@/lib/aspect-ratios';
+import type { ScenePreset } from '@/lib/scene-presets';
 import Link from 'next/link';
 
 const contentTabs = [
@@ -32,54 +33,50 @@ const contentTabs = [
   { id: 'sponsored', label: 'Sponsored', icon: <Megaphone className="w-4 h-4" /> },
 ];
 
-// Each swap aspect: where does it come from?
-// "target" = copy from the uploaded target image
-// "influencer" = use the influencer's own (default appearance / AI decides)
-// "custom" = user provides a text description
 type SwapSource = 'target' | 'influencer' | 'custom';
 
 export default function GeneratePage() {
   const { characters, selectedCharacter, setSelectedCharacter, activeProvider } = useAppStore();
-  const [prompt, setPrompt] = useState('');
+
+  // ── Structured fields — each controls ONE prompt section, no overlap ──
+  const [sceneText, setSceneText] = useState('');           // location, environment, lighting ONLY
+  const [outfitText, setOutfitText] = useState('');          // clothing ONLY
+  const [poseText, setPoseText] = useState('');              // pose/action ONLY
+  const [expressionText, setExpressionText] = useState('');  // facial expression ONLY
+
   const [contentType, setContentType] = useState<'image' | 'video'>('image');
-  const [outputFormat, setOutputFormat] = useState<'media' | 'prompt'>('media'); // media = image/video, prompt = text
+  const [outputFormat, setOutputFormat] = useState<'media' | 'prompt'>('media');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [resultType, setResultType] = useState<'image' | 'prompt'>('prompt');
-  const [fullPrompt, setFullPrompt] = useState<string | null>(null); // The complete prompt sent to AI
+  const [fullPrompt, setFullPrompt] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
+  const [previewPromptCopied, setPreviewPromptCopied] = useState(false);
   const [activeTab, setActiveTab] = useState('social');
+  const [selectedRatio, setSelectedRatio] = useState<AspectRatio | null>(null);
 
   const caps = activeProvider ? getModelCapabilities(activeProvider.model) : null;
   const canGenMedia = contentType === 'image' ? caps?.imageGeneration : caps?.videoGeneration;
 
-  // Auto-switch content type based on model capabilities
   useEffect(() => {
     if (!caps) return;
-    if (caps.videoGeneration && !caps.imageGeneration) {
-      setContentType('video');
-    } else if (!caps.videoGeneration) {
-      setContentType('image');
-    }
-    // Reset output to media if model supports it
+    if (caps.videoGeneration && !caps.imageGeneration) setContentType('video');
+    else if (!caps.videoGeneration) setContentType('image');
     setOutputFormat(caps.imageGeneration || caps.videoGeneration ? 'media' : 'prompt');
   }, [activeProvider?.id, caps?.videoGeneration, caps?.imageGeneration]);
 
-  // Sponsorship
+  // ── Sponsorship ──
   const [sponsorBrand, setSponsorBrand] = useState('');
   const [sponsorProduct, setSponsorProduct] = useState('');
   const [sponsorDesc, setSponsorDesc] = useState('');
   const [productImages, setProductImages] = useState<string[]>([]);
-  const [previewPromptCopied, setPreviewPromptCopied] = useState(false);
-  const [selectedRatio, setSelectedRatio] = useState<AspectRatio | null>(null);
 
-  // Swap state — independent aspects, each from target or influencer
+  // ── Swap ──
   const [swapImage, setSwapImage] = useState<string | null>(null);
   const [swapSceneEnabled, setSwapSceneEnabled] = useState(false);
-  // Face is ALWAYS influencer — no toggle needed
-  const [swapExpression, setSwapExpression] = useState<SwapSource>('target');   // smile/expression
+  const [swapExpression, setSwapExpression] = useState<SwapSource>('target');
   const [swapOutfit, setSwapOutfit] = useState<SwapSource>('target');
   const [swapPose, setSwapPose] = useState<SwapSource>('target');
   const [swapCustomOutfit, setSwapCustomOutfit] = useState('');
@@ -93,7 +90,27 @@ export default function GeneratePage() {
     e.target.value = '';
   };
 
-  // Live prompt preview — builds the full prompt in real-time
+  const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => setProductImages((prev) => [...prev, reader.result as string]);
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+  const removeProductImage = (i: number) => setProductImages((prev) => prev.filter((_, idx) => idx !== i));
+
+  // Apply a scene preset — fills separate fields
+  const applyPreset = (preset: ScenePreset) => {
+    setSceneText(preset.scene);
+    if (preset.outfit) setOutfitText(preset.outfit);
+    if (preset.pose) setPoseText(preset.pose);
+    if (preset.expression) setExpressionText(preset.expression);
+  };
+
+  // ── LIVE PROMPT — each section maps to exactly ONE control ──
   const hasRefImage = !!(selectedCharacter?.referenceImage || selectedCharacter?.avatar);
   const livePrompt = useMemo(() => {
     if (!selectedCharacter) return null;
@@ -101,102 +118,62 @@ export default function GeneratePage() {
     const isSwap = activeTab === 'swap';
     const hasSwapTarget = isSwap && !!swapImage;
 
-    // ── IMAGE ORDER GUIDE (always first so external tools know which image is which) ──
+    // IMAGE ORDER
     if (hasRefImage) {
-      const imageGuide: string[] = ['[IMAGE ORDER — READ THIS FIRST]'];
-      imageGuide.push('IMAGE 1 (first attached image): INFLUENCER FACE REFERENCE — This is the person whose face to use. This face is the identity. Match it exactly in the output.');
-      if (hasSwapTarget) {
-        imageGuide.push('IMAGE 2 (second attached image): TARGET IMAGE — This is the reference to swap from. Copy outfit/pose/scene/expression from this image as instructed below.');
-      }
-      if (activeTab === 'sponsored' && productImages.length > 0) {
-        imageGuide.push(`IMAGE ${hasSwapTarget ? '3+' : '2+'}: PRODUCT REFERENCE PHOTOS — Product images for sponsorship placement.`);
-      }
-      imageGuide.push('When uploading to any AI tool, always upload the influencer face photo FIRST, then the target/product images after.');
-      parts.push(imageGuide.join('\n'));
+      const guide: string[] = ['[IMAGE ORDER]'];
+      guide.push('IMAGE 1: INFLUENCER FACE — match this face exactly.');
+      if (hasSwapTarget) guide.push('IMAGE 2: TARGET IMAGE — swap source for outfit/pose/expression/scene.');
+      if (activeTab === 'sponsored' && productImages.length > 0) guide.push(`IMAGE ${hasSwapTarget ? '3+' : '2+'}: PRODUCT PHOTOS.`);
+      guide.push('Upload influencer photo FIRST, then target/product images.');
+      parts.push(guide.join('\n'));
     }
 
-    // ── FACE REFERENCE ──
+    // FACE (always influencer)
     if (hasRefImage) {
-      parts.push(`[INFLUENCER FACE — IMAGE 1]\nThe first image is the influencer\'s face. Match this face EXACTLY in the output: same bone structure, same eyes, same nose, same lips, same jawline, same skin tone. This face is the absolute source of truth. Do NOT alter any facial feature.`);
-      parts.push(`[SUPPLEMENTARY TEXT DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
+      parts.push(`[FACE — from IMAGE 1]\nMatch this face EXACTLY: bone structure, eyes, nose, lips, jawline, skin tone. This is the identity.`);
+      parts.push(`[TEXT DESCRIPTION]\n${selectedCharacter.consistencyPrompt || ''}`);
     } else {
-      parts.push(`[CHARACTER DESCRIPTION — no reference photo]\n${selectedCharacter.consistencyPrompt || ''}`);
+      parts.push(`[CHARACTER]\n${selectedCharacter.consistencyPrompt || ''}`);
     }
 
-    // ── SWAP INSTRUCTIONS ──
     if (isSwap) {
-      const swapLines: string[] = ['[SWAP / TRANSFER MODE]'];
-      if (hasSwapTarget) {
-        swapLines.push('The second image (IMAGE 2) is the TARGET to swap from.');
-      }
-      swapLines.push('Apply these rules:');
-
-      swapLines.push('FACE: ALWAYS use the INFLUENCER\'s face from IMAGE 1. The face identity must be the influencer. Never use the target\'s face.');
-
-      swapLines.push(swapExpression === 'target'
-        ? 'EXPRESSION: Copy the facial expression, smile, and emotion from the TARGET (IMAGE 2). The influencer\'s face should show the same expression as the person in the target.'
-        : 'EXPRESSION: Use the INFLUENCER\'s natural expression. Ignore the target\'s expression.');
-
-      if (swapOutfit === 'target') swapLines.push('OUTFIT: Copy the EXACT outfit/clothing from the TARGET (IMAGE 2). Replicate fabric, color, pattern, accessories.');
-      else if (swapOutfit === 'custom' && swapCustomOutfit) swapLines.push(`OUTFIT: ${swapCustomOutfit}`);
-      else swapLines.push('OUTFIT: Use the INFLUENCER\'s signature style. Ignore target outfit.');
-
-      swapLines.push(swapPose === 'target'
-        ? 'POSE: Match the EXACT body pose and gesture from the TARGET (IMAGE 2).'
-        : 'POSE: Use a natural pose. Ignore target pose.');
-
-      // Background / Scene — controlled by the scene toggle
-      if (swapSceneEnabled && prompt.trim()) {
-        swapLines.push(`BACKGROUND/SCENE: Use this custom scene instead of the target background: ${prompt}`);
+      // ── SWAP: each aspect is one line, no overlap ──
+      const s: string[] = ['[SWAP INSTRUCTIONS]'];
+      if (hasSwapTarget) s.push('Target image is IMAGE 2.');
+      s.push('FACE: Always influencer (IMAGE 1). Never use target face.');
+      s.push(swapExpression === 'target' ? 'EXPRESSION: Copy smile/emotion from TARGET.' : 'EXPRESSION: Influencer natural expression.');
+      s.push(swapOutfit === 'target' ? 'OUTFIT: Copy exact clothing from TARGET.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Influencer signature style.');
+      s.push(swapPose === 'target' ? 'POSE: Copy exact pose from TARGET.' : 'POSE: Natural pose, AI decides.');
+      if (swapSceneEnabled && sceneText.trim()) {
+        s.push(`BACKGROUND: ${sceneText}`);
       } else {
-        swapLines.push('BACKGROUND/SCENE: Keep the EXACT scene/background/setting from the TARGET (IMAGE 2).');
+        s.push('BACKGROUND: Keep exact background from TARGET.');
       }
-
-      parts.push(swapLines.join('\n'));
+      parts.push(s.join('\n'));
+    } else {
+      // ── SOCIAL / SPONSORED: each field is one section ──
+      if (sceneText.trim()) parts.push(`[SCENE] ${sceneText}`);
+      if (outfitText.trim()) parts.push(`[OUTFIT] ${outfitText}`);
+      if (poseText.trim()) parts.push(`[POSE] ${poseText}`);
+      if (expressionText.trim()) parts.push(`[EXPRESSION] ${expressionText}`);
     }
 
-    // ── SPONSORSHIP ──
     if (activeTab === 'sponsored' && sponsorBrand) {
-      parts.push(`[SPONSORSHIP] Promoting ${sponsorBrand}'s ${sponsorProduct}. ${sponsorDesc}. Show product naturally integrated.`);
+      parts.push(`[SPONSORSHIP] Promoting ${sponsorBrand} ${sponsorProduct}. ${sponsorDesc}. Product naturally integrated.`);
     }
-
-    // ── SCENE ──
-    if (prompt.trim()) {
-      parts.push(`[SCENE] ${prompt}`);
-    }
-
-    // ── ASPECT RATIO ──
     if (selectedRatio) {
-      parts.push(`[ASPECT RATIO] ${selectedRatio.ratio} (${selectedRatio.width}x${selectedRatio.height}) — ${selectedRatio.platform} ${selectedRatio.label}.`);
+      parts.push(`[RATIO] ${selectedRatio.ratio} (${selectedRatio.width}x${selectedRatio.height}) — ${selectedRatio.platform} ${selectedRatio.label}.`);
     }
-
-    // ── FINAL REMINDER ──
     if (hasRefImage) {
-      parts.push(`[REMINDER] IMAGE 1 = influencer face = the identity. Always preserve this face exactly. Everything else (outfit, pose, background, expression) follows the rules above.`);
+      parts.push(`[REMINDER] IMAGE 1 = influencer face = identity. Preserve it exactly.`);
     }
     return parts.join('\n\n') || null;
-  }, [selectedCharacter, prompt, activeTab, sponsorBrand, sponsorProduct, sponsorDesc, hasRefImage, selectedRatio, swapImage, swapExpression, swapOutfit, swapPose, swapSceneEnabled, swapCustomOutfit, productImages.length]);
+  }, [selectedCharacter, sceneText, outfitText, poseText, expressionText, activeTab, sponsorBrand, sponsorProduct, sponsorDesc, hasRefImage, selectedRatio, swapImage, swapExpression, swapOutfit, swapPose, swapSceneEnabled, swapCustomOutfit, productImages.length]);
 
-  const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setProductImages((prev) => [...prev, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
-    });
-    e.target.value = '';
-  };
-
-  const removeProductImage = (index: number) => {
-    setProductImages((prev) => prev.filter((_, i) => i !== index));
-  };
-
+  // ── GENERATE ──
   const handleGenerate = async () => {
     if (!selectedCharacter) { toast.error('Select a character first'); return; }
-    if (activeTab !== 'swap' && !prompt.trim()) { toast.error('Enter a prompt'); return; }
+    if (activeTab !== 'swap' && !sceneText.trim()) { toast.error('Enter a scene description'); return; }
     if (!activeProvider) { toast.error('Configure an AI provider in Settings'); return; }
 
     setGenerating(true);
@@ -205,17 +182,22 @@ export default function GeneratePage() {
         ? { brand: sponsorBrand, product: sponsorProduct, description: sponsorDesc, productImages: productImages.length > 0 ? productImages : undefined }
         : undefined;
 
-      // Build swap-aware prompt
-      let userPrompt = prompt;
+      let userPrompt: string;
       if (activeTab === 'swap') {
-        const sp: string[] = ['Recreate the target image with these rules:'];
-        sp.push('FACE: Always use influencer face from reference.');
-        sp.push(swapExpression === 'target' ? 'EXPRESSION: Copy target smile/expression.' : 'EXPRESSION: Use influencer natural expression.');
-        sp.push(swapOutfit === 'target' ? 'OUTFIT: Copy exact outfit from target.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Use influencer style.');
-        sp.push(swapPose === 'target' ? 'POSE: Match target pose exactly.' : 'POSE: Natural pose.');
-        sp.push(swapSceneEnabled && prompt.trim() ? `BACKGROUND: ${prompt}` : 'BACKGROUND: Keep target background.');
-        if (prompt) sp.push(`Additional: ${prompt}`);
+        const sp: string[] = [];
+        sp.push('FACE: Influencer face.');
+        sp.push(swapExpression === 'target' ? 'EXPRESSION: Copy target.' : 'EXPRESSION: Influencer natural.');
+        sp.push(swapOutfit === 'target' ? 'OUTFIT: Copy target.' : swapOutfit === 'custom' && swapCustomOutfit ? `OUTFIT: ${swapCustomOutfit}` : 'OUTFIT: Influencer style.');
+        sp.push(swapPose === 'target' ? 'POSE: Copy target.' : 'POSE: Natural.');
+        sp.push(swapSceneEnabled && sceneText.trim() ? `BACKGROUND: ${sceneText}` : 'BACKGROUND: Keep target.');
         userPrompt = sp.join(' ');
+      } else {
+        const pieces: string[] = [];
+        if (sceneText.trim()) pieces.push(`Scene: ${sceneText}`);
+        if (outfitText.trim()) pieces.push(`Outfit: ${outfitText}`);
+        if (poseText.trim()) pieces.push(`Pose: ${poseText}`);
+        if (expressionText.trim()) pieces.push(`Expression: ${expressionText}`);
+        userPrompt = pieces.join('. ');
       }
 
       const res = await generateContent({
@@ -233,7 +215,7 @@ export default function GeneratePage() {
       setFullPrompt(res.prompt);
       setShowPrompt(true);
 
-      const content: GeneratedContent = {
+      await db.generatedContent.add({
         id: uuid(),
         characterId: selectedCharacter.id,
         type: contentType,
@@ -241,8 +223,7 @@ export default function GeneratePage() {
         result: res.result || res.prompt,
         sponsorship: sponsorship ? { enabled: true, ...sponsorship } : { enabled: false },
         createdAt: Date.now(),
-      };
-      await db.generatedContent.add(content);
+      });
       toast.success('Content generated!');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Generation failed');
@@ -265,76 +246,41 @@ export default function GeneratePage() {
         <p className="text-xs sm:text-sm text-muted-foreground">Create photos and videos with your AI influencer characters</p>
       </div>
 
-      {/* Provider Selector */}
+      {/* Provider */}
       <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
         <div className="flex-1">
           <p className="text-[11px] text-muted-foreground mb-1 font-medium">AI Provider</p>
           <ProviderSelector />
         </div>
-        {!activeProvider && (
-          <Link href="/settings"><Button size="sm" variant="outline">Configure Provider</Button></Link>
-        )}
+        {!activeProvider && <Link href="/settings"><Button size="sm" variant="outline">Configure Provider</Button></Link>}
       </div>
 
-      {/* Capability Banner */}
+      {/* Capabilities */}
       {activeProvider && caps && (
         <div className="flex flex-wrap gap-2 text-[11px]">
-          {caps.imageGeneration && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success">
-              <Check className="w-3 h-3" /> Image generation
-            </div>
-          )}
-          {caps.videoGeneration && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success">
-              <Check className="w-3 h-3" /> Video generation
-            </div>
-          )}
-          {!caps.imageGeneration && !caps.videoGeneration && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-muted border-border text-muted-foreground">
-              <Info className="w-3 h-3" /> Prompt only (no media gen)
-            </div>
-          )}
-          {caps.visionInput && selectedCharacter && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success">
-              <Check className="w-3 h-3" /> {selectedCharacter.referenceImage ? 'AI face ref sent' : 'Photo ref sent'}
-            </div>
-          )}
-          {!caps.visionInput && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-warning/10 border-warning/20 text-warning">
-              <Info className="w-3 h-3" /> No vision — text only
-            </div>
-          )}
+          {caps.imageGeneration && <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success"><Check className="w-3 h-3" /> Image gen</div>}
+          {caps.videoGeneration && <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success"><Check className="w-3 h-3" /> Video gen</div>}
+          {!caps.imageGeneration && !caps.videoGeneration && <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-muted border-border text-muted-foreground"><Info className="w-3 h-3" /> Prompt only</div>}
+          {caps.visionInput && selectedCharacter && <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-success/10 border-success/20 text-success"><Check className="w-3 h-3" /> {selectedCharacter.referenceImage ? 'AI face ref' : 'Photo ref'} sent</div>}
+          {!caps.visionInput && <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-warning/10 border-warning/20 text-warning"><Info className="w-3 h-3" /> No vision</div>}
           <span className="flex items-center text-muted-foreground px-1 text-[10px]">{caps.reasoning}</span>
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* Left: Config */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Character Selection */}
+          {/* Character */}
           <Card>
             <h2 className="text-sm font-semibold mb-3">Select Character</h2>
             {characters.length > 0 ? (
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
                 {characters.map((char) => (
-                  <button
-                    key={char.id}
-                    onClick={() => setSelectedCharacter(char)}
-                    className={`relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer aspect-square
-                      ${selectedCharacter?.id === char.id
-                        ? 'border-primary ring-2 ring-primary/20'
-                        : 'border-border hover:border-primary/30'}`}
-                  >
+                  <button key={char.id} onClick={() => setSelectedCharacter(char)}
+                    className={`relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer aspect-square ${selectedCharacter?.id === char.id ? 'border-primary ring-2 ring-primary/20' : 'border-border hover:border-primary/30'}`}>
                     <img src={char.avatar} alt={char.name} className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-linear-to-t from-black/80 to-transparent" />
-                    <span className="absolute bottom-1 left-1.5 right-1 text-[10px] font-medium text-white truncate">
-                      {char.name}
-                    </span>
-                    {selectedCharacter?.id === char.id && (
-                      <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
-                        <Check className="w-2.5 h-2.5 text-white" />
-                      </div>
-                    )}
+                    <span className="absolute bottom-1 left-1.5 right-1 text-[10px] font-medium text-white truncate">{char.name}</span>
+                    {selectedCharacter?.id === char.id && <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-primary flex items-center justify-center"><Check className="w-2.5 h-2.5 text-white" /></div>}
                   </button>
                 ))}
               </div>
@@ -346,448 +292,228 @@ export default function GeneratePage() {
             )}
           </Card>
 
-          {/* Content Tabs */}
+          {/* Tabs */}
           <Tabs tabs={contentTabs} defaultTab="social" onChange={setActiveTab}>
             {(tab) => (
               <div className="space-y-4">
-                {/* Scene description — always for social/sponsored, toggleable for swap */}
-                <Card>
-                  {tab === 'swap' && (
-                    <div className="flex items-center justify-between mb-3">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={swapSceneEnabled}
-                          onChange={(e) => setSwapSceneEnabled(e.target.checked)}
-                          className="w-3.5 h-3.5 rounded border-border accent-primary"
-                        />
-                        <span className="text-xs font-medium">Custom Background / Scene</span>
-                      </label>
-                      <span className="text-[10px] text-muted-foreground">{swapSceneEnabled ? 'Custom scene — overrides target background' : 'Using target image background'}</span>
-                    </div>
-                  )}
-                  {(tab !== 'swap' || swapSceneEnabled) && (
-                    <>
-                      <Textarea
-                        label={tab === 'swap' ? 'Custom Background / Scene' : 'Scene Description'}
-                        id="prompt"
-                        placeholder={tab === 'swap' ? 'e.g., sunset beach, modern office, Dhaka rooftop...' : 'Describe the scene, pose, setting, mood...'}
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        rows={tab === 'swap' ? 2 : 3}
-                      />
-                      <div className="mt-3">
-                        <ScenePicker onSelect={setPrompt} />
+                {/* ── SCENE + OUTFIT + POSE + EXPRESSION — 4 separate fields ── */}
+                {(tab !== 'swap' || swapSceneEnabled) && (
+                  <Card>
+                    {tab === 'swap' && (
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={swapSceneEnabled} onChange={(e) => setSwapSceneEnabled(e.target.checked)} className="w-3.5 h-3.5 rounded accent-primary" />
+                          <span className="text-xs font-medium">Custom Background</span>
+                        </label>
+                        <span className="text-[10px] text-muted-foreground">Overrides target background</span>
                       </div>
-                    </>
-                  )}
-                  {tab !== 'swap' && (
-                    <div className="mt-4 pt-4 border-t border-border">
-                      <RatioPicker selected={selectedRatio} onSelect={setSelectedRatio} />
+                    )}
+                    <Textarea label={tab === 'swap' ? 'Custom Background' : 'Scene / Location'} id="scene"
+                      placeholder="Location, environment, lighting, atmosphere..." value={sceneText} onChange={(e) => setSceneText(e.target.value)} rows={2} />
+                    <div className="mt-3">
+                      <ScenePicker onSelect={applyPreset} mode={tab === 'swap' ? 'scene-only' : 'full'} />
                     </div>
-                  )}
-                </Card>
 
-                {/* ── Swap Mode ── */}
+                    {tab !== 'swap' && (
+                      <>
+                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <Input label="Outfit / Clothing" id="outfit" placeholder="e.g., red saree, business suit..." value={outfitText} onChange={(e) => setOutfitText(e.target.value)} />
+                          <Input label="Pose / Action" id="pose" placeholder="e.g., standing, selfie, walking..." value={poseText} onChange={(e) => setPoseText(e.target.value)} />
+                          <Input label="Expression" id="expression" placeholder="e.g., smiling, serious, laughing..." value={expressionText} onChange={(e) => setExpressionText(e.target.value)} />
+                        </div>
+                        <div className="mt-4 pt-4 border-t border-border">
+                          <RatioPicker selected={selectedRatio} onSelect={setSelectedRatio} />
+                        </div>
+                      </>
+                    )}
+                  </Card>
+                )}
+                {tab === 'swap' && !swapSceneEnabled && (
+                  <Card>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5" /> Background from target image.
+                      <button onClick={() => setSwapSceneEnabled(true)} className="text-primary underline cursor-pointer">Change?</button>
+                    </p>
+                  </Card>
+                )}
+
+                {/* ── SWAP CONTROLS ── */}
                 {tab === 'swap' && (
                   <>
-                    {/* Upload target */}
                     <Card glow>
                       <div className="flex items-center gap-2 mb-3">
                         <Repeat className="w-4 h-4 text-primary" />
                         <h3 className="text-sm font-semibold">Swap / Transfer</h3>
                       </div>
-                      <p className="text-[11px] text-muted-foreground mb-3">
-                        Upload a reference image. Choose what to take from it vs your influencer.
-                      </p>
-
                       {swapImage ? (
                         <div className="relative group rounded-xl overflow-hidden">
-                          <img src={swapImage} alt="Swap target" className="w-full h-48 object-cover rounded-xl" />
+                          <img src={swapImage} alt="Target" className="w-full h-48 object-cover rounded-xl" />
                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
-                            <button onClick={() => setSwapImage(null)} className="opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-destructive rounded-full cursor-pointer">
-                              <X className="w-4 h-4 text-white" />
-                            </button>
+                            <button onClick={() => setSwapImage(null)} className="opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-destructive rounded-full cursor-pointer"><X className="w-4 h-4 text-white" /></button>
                           </div>
                           <Badge className="absolute top-2 left-2">Target Image</Badge>
                         </div>
                       ) : (
                         <label className="flex flex-col items-center justify-center gap-3 py-8 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer">
-                          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-                            <Upload className="w-6 h-6 text-primary/60" />
-                          </div>
+                          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center"><Upload className="w-6 h-6 text-primary/60" /></div>
                           <p className="text-xs font-medium">Upload target image</p>
                           <input type="file" accept="image/*,video/*" className="hidden" onChange={handleSwapImageUpload} />
                         </label>
                       )}
-                      {!caps?.visionInput && (
-                        <p className="text-[10px] text-warning mt-2 flex items-center gap-1">
-                          <Info className="w-3 h-3 shrink-0" /> {activeProvider?.model} has no vision — only text prompt will be generated.
-                        </p>
-                      )}
                     </Card>
 
-                    {/* 4 independent swap controls */}
                     <Card>
                       <h3 className="text-xs font-semibold mb-1">What to use from where?</h3>
-                      <p className="text-[10px] text-muted-foreground mb-4">For each aspect, choose: copy from the <strong>target image</strong>, use the <strong>influencer&apos;s own</strong>, or write <strong>custom</strong>.</p>
+                      <p className="text-[10px] text-muted-foreground mb-4">Face is always the influencer. Choose the rest.</p>
 
-                      {/* FACE — always influencer, no toggle */}
                       <div className="mb-3 pb-3 border-b border-border">
                         <p className="text-[11px] font-medium mb-1.5 flex items-center gap-1.5"><User className="w-3.5 h-3.5" /> Face</p>
-                        <div className="flex gap-1.5">
-                          <div className="flex-1 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-primary/10 border border-primary/30 text-primary text-center">
-                            Always Influencer
-                          </div>
-                        </div>
-                        <p className="text-[9px] text-muted-foreground mt-1">Face identity is always your influencer character — this cannot be changed.</p>
+                        <div className="px-2 py-1.5 rounded-lg text-[10px] font-medium bg-primary/10 border border-primary/30 text-primary text-center">Always Influencer</div>
                       </div>
 
-                      {/* EXPRESSION / SMILE */}
-                      <SwapRow
-                        icon={<Sparkles className="w-3.5 h-3.5" />}
-                        label="Expression / Smile"
-                        value={swapExpression}
-                        onChange={setSwapExpression}
-                        options={[
-                          { id: 'target', label: 'Copy target expression' },
-                          { id: 'influencer', label: 'Influencer natural' },
-                        ]}
-                      />
-
-                      {/* OUTFIT */}
-                      <SwapRow
-                        icon={<Shirt className="w-3.5 h-3.5" />}
-                        label="Outfit"
-                        value={swapOutfit}
-                        onChange={setSwapOutfit}
-                        options={[
-                          { id: 'target', label: 'From target image' },
-                          { id: 'influencer', label: 'Influencer style' },
-                          { id: 'custom', label: 'Custom' },
-                        ]}
-                        customValue={swapCustomOutfit}
-                        onCustomChange={setSwapCustomOutfit}
-                        customPlaceholder="e.g., red silk dress, gold jewelry"
-                      />
-
-                      {/* POSE */}
-                      <SwapRow
-                        icon={<Layers className="w-3.5 h-3.5" />}
-                        label="Pose"
-                        value={swapPose}
-                        onChange={setSwapPose}
-                        options={[
-                          { id: 'target', label: 'Copy target pose' },
-                          { id: 'influencer', label: 'Natural / AI decides' },
-                        ]}
-                      />
-
-                      {/* BACKGROUND — controlled by the scene toggle above */}
-                      <div>
-                        <p className="text-[11px] font-medium mb-1.5 flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5" /> Background / Scene</p>
-                        <div className="flex gap-1.5">
-                          <div className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-medium text-center border
-                            ${!swapSceneEnabled ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-secondary border-transparent text-muted-foreground'}`}>
-                            {swapSceneEnabled ? 'Overridden by custom scene above' : 'From target image'}
-                          </div>
-                        </div>
-                        <p className="text-[9px] text-muted-foreground mt-1">
-                          {swapSceneEnabled
-                            ? 'Enable the "Custom Background / Scene" toggle above to change the background.'
-                            : 'Toggle "Custom Background / Scene" above to use a different background instead of the target\'s.'}
-                        </p>
-                      </div>
+                      <SwapRow icon={<Sparkles className="w-3.5 h-3.5" />} label="Expression / Smile" value={swapExpression} onChange={setSwapExpression}
+                        options={[{ id: 'target', label: 'Copy target' }, { id: 'influencer', label: 'Influencer natural' }]} />
+                      <SwapRow icon={<Shirt className="w-3.5 h-3.5" />} label="Outfit" value={swapOutfit} onChange={setSwapOutfit}
+                        options={[{ id: 'target', label: 'From target' }, { id: 'influencer', label: 'Influencer style' }, { id: 'custom', label: 'Custom' }]}
+                        customValue={swapCustomOutfit} onCustomChange={setSwapCustomOutfit} customPlaceholder="e.g., red silk dress" />
+                      <SwapRow icon={<Layers className="w-3.5 h-3.5" />} label="Pose" value={swapPose} onChange={setSwapPose}
+                        options={[{ id: 'target', label: 'Copy target' }, { id: 'influencer', label: 'Natural / AI' }]} last />
                     </Card>
 
-                    {/* Aspect ratio */}
-                    <Card>
-                      <RatioPicker selected={selectedRatio} onSelect={setSelectedRatio} />
-                    </Card>
+                    <Card><RatioPicker selected={selectedRatio} onSelect={setSelectedRatio} /></Card>
                   </>
                 )}
 
+                {/* ── SPONSORSHIP ── */}
                 {tab === 'sponsored' && (
                   <Card glow>
-                    <div className="flex items-center gap-2 mb-3">
-                      <ShoppingBag className="w-4 h-4 text-primary" />
-                      <h3 className="text-sm font-semibold">Sponsorship</h3>
-                    </div>
+                    <div className="flex items-center gap-2 mb-3"><ShoppingBag className="w-4 h-4 text-primary" /><h3 className="text-sm font-semibold">Sponsorship</h3></div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <Input label="Brand" id="brand" placeholder="e.g., Nike" value={sponsorBrand} onChange={(e) => setSponsorBrand(e.target.value)} />
                       <Input label="Product" id="product" placeholder="e.g., Air Max 2026" value={sponsorProduct} onChange={(e) => setSponsorProduct(e.target.value)} />
                     </div>
-                    <div className="mt-3">
-                      <Textarea label="Notes" id="sponsorDesc" placeholder="Product placement instructions..." value={sponsorDesc} onChange={(e) => setSponsorDesc(e.target.value)} rows={2} />
-                    </div>
-
-                    {/* Product Photo Upload */}
+                    <div className="mt-3"><Textarea label="Notes" id="sponsorDesc" placeholder="Product placement instructions..." value={sponsorDesc} onChange={(e) => setSponsorDesc(e.target.value)} rows={2} /></div>
                     <div className="mt-4 pt-4 border-t border-border">
                       <div className="flex items-center justify-between mb-2.5">
-                        <div>
-                          <p className="text-sm font-medium flex items-center gap-1.5">
-                            <Camera className="w-4 h-4 text-primary" />
-                            Product Photos
-                          </p>
-                          <p className="text-[11px] text-muted-foreground mt-0.5">
-                            Upload product images for AI reference (supported by Gemini, GPT-4o, Qwen)
-                          </p>
-                        </div>
+                        <p className="text-sm font-medium flex items-center gap-1.5"><Camera className="w-4 h-4 text-primary" /> Product Photos</p>
                         <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">
-                          <Upload className="w-3.5 h-3.5" />
-                          Add Photos
-                          <input
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            onChange={handleProductImageUpload}
-                            className="hidden"
-                          />
+                          <Upload className="w-3.5 h-3.5" /> Add
+                          <input type="file" accept="image/*" multiple onChange={handleProductImageUpload} className="hidden" />
                         </label>
                       </div>
-
                       {productImages.length > 0 && (
                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mt-2">
                           {productImages.map((img, i) => (
                             <div key={i} className="relative group rounded-xl overflow-hidden border border-border aspect-square">
                               <img src={img} alt={`Product ${i + 1}`} className="w-full h-full object-cover" />
-                              <button
-                                onClick={() => removeProductImage(i)}
-                                className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-destructive"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                              <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[9px] text-white text-center py-0.5">
-                                #{i + 1}
-                              </div>
+                              <button onClick={() => removeProductImage(i)} className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-destructive"><X className="w-3 h-3" /></button>
                             </div>
                           ))}
-                          {/* Add more button */}
-                          <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border hover:border-primary/40 transition-colors cursor-pointer aspect-square">
-                            <Upload className="w-4 h-4 text-muted-foreground" />
-                            <span className="text-[9px] text-muted-foreground mt-1">Add more</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              onChange={handleProductImageUpload}
-                              className="hidden"
-                            />
-                          </label>
                         </div>
                       )}
-
                       {productImages.length === 0 && (
                         <label className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer mt-2">
-                          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                            <Camera className="w-5 h-5 text-primary/60" />
-                          </div>
-                          <div className="text-center">
-                            <p className="text-xs font-medium text-muted-foreground">Drop product photos here</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">PNG, JPG, WebP</p>
-                          </div>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            onChange={handleProductImageUpload}
-                            className="hidden"
-                          />
+                          <Camera className="w-5 h-5 text-primary/60" />
+                          <p className="text-xs font-medium text-muted-foreground">Drop product photos here</p>
+                          <input type="file" accept="image/*" multiple onChange={handleProductImageUpload} className="hidden" />
                         </label>
                       )}
                     </div>
                   </Card>
                 )}
 
-                {/* Content type: Photo / Video */}
+                {/* Content type + Output format + Generate */}
                 <div>
                   <p className="text-[11px] text-muted-foreground mb-1.5 font-medium">Content Type</p>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => setContentType('image')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border cursor-pointer
-                        ${contentType === 'image' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
-                    >
+                    <button onClick={() => setContentType('image')} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border cursor-pointer ${contentType === 'image' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
                       <ImageIcon className="w-4 h-4" /> Photo
                     </button>
-                    <button
-                      onClick={() => caps?.videoGeneration && setContentType('video')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border
-                        ${contentType === 'video' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground'}
-                        ${caps?.videoGeneration ? 'cursor-pointer hover:text-foreground' : 'opacity-40 cursor-not-allowed'}`}
-                      title={caps && !caps.videoGeneration ? getUnavailableReason('videoGeneration', activeProvider?.model || '') : undefined}
-                    >
-                      <Video className="w-4 h-4" /> Video
-                      {caps && !caps.videoGeneration && <Ban className="w-3 h-3" />}
+                    <button onClick={() => caps?.videoGeneration && setContentType('video')} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border ${contentType === 'video' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground'} ${caps?.videoGeneration ? 'cursor-pointer hover:text-foreground' : 'opacity-40 cursor-not-allowed'}`}>
+                      <Video className="w-4 h-4" /> Video {caps && !caps.videoGeneration && <Ban className="w-3 h-3" />}
                     </button>
                   </div>
                 </div>
 
-                {/* Output format: Image/Video or Prompt */}
                 <div>
                   <p className="text-[11px] text-muted-foreground mb-1.5 font-medium">Output Format</p>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => canGenMedia && setOutputFormat('media')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium transition-all border
-                        ${outputFormat === 'media' && canGenMedia ? 'bg-success/10 border-success/30 text-success' : 'border-border text-muted-foreground'}
-                        ${canGenMedia ? 'cursor-pointer hover:text-foreground' : 'opacity-40 cursor-not-allowed'}`}
-                      title={!canGenMedia ? `${activeProvider?.model} cannot generate ${contentType === 'video' ? 'video' : 'images'}` : undefined}
-                    >
-                      {contentType === 'video' ? <Video className="w-3.5 h-3.5" /> : <ImageIcon className="w-3.5 h-3.5" />}
-                      {contentType === 'video' ? 'Video Output' : 'Image Output'}
-                      {canGenMedia && <Badge variant="success" className="text-[8px] px-1 py-0">AI</Badge>}
-                      {!canGenMedia && <Ban className="w-3 h-3" />}
+                    <button onClick={() => canGenMedia && setOutputFormat('media')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium transition-all border ${outputFormat === 'media' && canGenMedia ? 'bg-success/10 border-success/30 text-success' : 'border-border text-muted-foreground'} ${canGenMedia ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}>
+                      {contentType === 'video' ? <Video className="w-3.5 h-3.5" /> : <ImageIcon className="w-3.5 h-3.5" />} {contentType === 'video' ? 'Video' : 'Image'} Output {canGenMedia && <Badge variant="success" className="text-[8px] px-1 py-0">AI</Badge>} {!canGenMedia && <Ban className="w-3 h-3" />}
                     </button>
-                    <button
-                      onClick={() => setOutputFormat('prompt')}
-                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium transition-all border cursor-pointer
-                        ${outputFormat === 'prompt' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
-                    >
+                    <button onClick={() => setOutputFormat('prompt')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium transition-all border cursor-pointer ${outputFormat === 'prompt' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
                       <Copy className="w-3.5 h-3.5" /> Text Prompt
                     </button>
                   </div>
-                  {outputFormat === 'prompt' && canGenMedia && (
-                    <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
-                      <Info className="w-3 h-3 shrink-0" /> Will generate a detailed text prompt instead of {contentType === 'video' ? 'video' : 'an image'}. Use it with any external generator.
-                    </p>
-                  )}
-                  {!canGenMedia && outputFormat === 'media' && (
-                    <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
-                      <Info className="w-3 h-3 shrink-0" /> {getUnavailableReason(contentType === 'video' ? 'videoGeneration' : 'imageGeneration', activeProvider?.model || '')}
-                    </p>
-                  )}
                 </div>
 
                 <Button onClick={handleGenerate} loading={generating} className="w-full" size="lg"
-                  disabled={!selectedCharacter || (activeTab !== 'swap' && !prompt.trim())}>
+                  disabled={!selectedCharacter || (activeTab !== 'swap' && !sceneText.trim())}>
                   <Zap className="w-5 h-5" />
-                  {generating ? 'Generating...'
-                    : outputFormat === 'prompt' ? 'Generate Prompt'
-                    : contentType === 'video' ? 'Generate Video'
-                    : 'Generate Image'}
+                  {generating ? 'Generating...' : outputFormat === 'prompt' ? 'Generate Prompt' : contentType === 'video' ? 'Generate Video' : 'Generate Image'}
                 </Button>
               </div>
             )}
           </Tabs>
         </div>
 
-        {/* Right: Prompt Preview + Result */}
+        {/* Right panel */}
         <div className="space-y-4">
-          {/* Live Prompt Preview — always visible when character + scene selected */}
           {livePrompt && (
             <Card>
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-semibold flex items-center gap-1.5">
-                  <FileJson className="w-4 h-4 text-primary" />
-                  Prompt Preview
-                </h2>
-                <button
-                  onClick={async () => {
-                    const ok = await copyToClipboard(livePrompt);
-                    if (ok) { setPreviewPromptCopied(true); setTimeout(() => setPreviewPromptCopied(false), 2000); }
-                  }}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
-                >
-                  {previewPromptCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {previewPromptCopied ? 'Copied!' : 'Copy Prompt'}
+                <h2 className="text-sm font-semibold flex items-center gap-1.5"><FileJson className="w-4 h-4 text-primary" /> Prompt Preview</h2>
+                <button onClick={async () => { const ok = await copyToClipboard(livePrompt); if (ok) { setPreviewPromptCopied(true); setTimeout(() => setPreviewPromptCopied(false), 2000); } }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">
+                  {previewPromptCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {previewPromptCopied ? 'Copied!' : 'Copy Prompt'}
                 </button>
               </div>
-              <p className="text-[10px] text-muted-foreground mb-2">
-                This is the full prompt that will be sent. Copy it to use in Midjourney, DALL-E, ComfyUI, etc.
-              </p>
+              <p className="text-[10px] text-muted-foreground mb-2">Full prompt for external tools. Upload influencer photo first, then target.</p>
               <div className="bg-secondary rounded-xl p-3 max-h-40 overflow-y-auto">
                 <p className="text-[11px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono">{livePrompt}</p>
               </div>
-              {!prompt.trim() && activeTab !== 'swap' && (
-                <p className="text-[10px] text-warning mt-2 flex items-center gap-1"><Info className="w-3 h-3" /> Type a scene description to complete the prompt</p>
-              )}
             </Card>
           )}
 
-          {/* Generated Output */}
           <Card className="lg:sticky lg:top-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold">Output</h2>
-              {result && (
-                <button onClick={handleCopyResult} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">
-                  {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {copied ? 'Copied' : 'Copy Result'}
-                </button>
-              )}
+              {result && <button onClick={handleCopyResult} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">{copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {copied ? 'Copied' : 'Copy'}</button>}
             </div>
-
             <AnimatePresence mode="wait">
               {generating ? (
-                <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+                <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                   <div className="animate-shimmer w-full h-48 sm:h-64 rounded-xl bg-secondary" />
-                  <p className="text-xs text-muted-foreground text-center animate-pulse">Generating...</p>
                 </motion.div>
               ) : result ? (
                 <motion.div key="result" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-                  {(resultType === 'image' && (result.startsWith('http') || result.startsWith('data:'))) ? (
-                    <img src={result} alt="Generated" className="w-full rounded-xl" />
-                  ) : (
-                    <div className="bg-secondary rounded-xl p-4 max-h-72 overflow-y-auto">
-                      <Badge className="mb-2">Generated Prompt</Badge>
-                      <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{result}</p>
-                    </div>
-                  )}
+                  {(resultType === 'image' && (result.startsWith('http') || result.startsWith('data:')))
+                    ? <img src={result} alt="Generated" className="w-full rounded-xl" />
+                    : <div className="bg-secondary rounded-xl p-4 max-h-72 overflow-y-auto"><Badge className="mb-2">Generated</Badge><p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{result}</p></div>}
                 </motion.div>
               ) : (
-                <EmptyState
-                  icon={<Sparkles className="w-8 h-8 text-primary/30" />}
-                  title="Ready"
-                  description="Generated content appears here"
-                />
+                <EmptyState icon={<Sparkles className="w-8 h-8 text-primary/30" />} title="Ready" description="Generated content appears here" />
               )}
             </AnimatePresence>
-
-            {/* Character info */}
             {selectedCharacter && (
               <div className="mt-4 pt-3 border-t border-border flex items-center gap-2.5">
                 <img src={selectedCharacter.avatar} alt={selectedCharacter.name} className="w-9 h-9 rounded-lg object-cover" />
-                {selectedCharacter.referenceImage && (
-                  <div className="relative">
-                    <img src={selectedCharacter.referenceImage} alt="AI Ref" className="w-9 h-9 rounded-lg object-cover border border-primary/30" />
-                    <span className="absolute -top-1 -right-1 text-[7px] bg-primary text-white px-1 rounded-full">AI</span>
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="text-xs font-medium truncate">{selectedCharacter.name}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {selectedCharacter.referenceImage ? 'AI face ref' : selectedCharacter.analysis ? 'Original photo ref' : 'No analysis'}
-                  </p>
-                </div>
+                {selectedCharacter.referenceImage && <div className="relative"><img src={selectedCharacter.referenceImage} alt="Ref" className="w-9 h-9 rounded-lg object-cover border border-primary/30" /><span className="absolute -top-1 -right-1 text-[7px] bg-primary text-white px-1 rounded-full">AI</span></div>}
+                <div className="min-w-0"><p className="text-xs font-medium truncate">{selectedCharacter.name}</p></div>
               </div>
             )}
           </Card>
 
-          {/* Full Prompt Panel — always visible after generation */}
           {fullPrompt && showPrompt && (
             <Card>
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-semibold flex items-center gap-1.5">
-                  <FileJson className="w-4 h-4 text-primary" />
-                  Full Prompt
-                </h2>
-                <button
-                  onClick={async () => {
-                    const ok = await copyToClipboard(fullPrompt);
-                    if (ok) { setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); }
-                  }}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
-                >
-                  {promptCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {promptCopied ? 'Copied!' : 'Copy Prompt'}
+                <h2 className="text-sm font-semibold flex items-center gap-1.5"><FileJson className="w-4 h-4 text-primary" /> Sent Prompt</h2>
+                <button onClick={async () => { const ok = await copyToClipboard(fullPrompt); if (ok) { setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); } }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">
+                  {promptCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} {promptCopied ? 'Copied!' : 'Copy'}
                 </button>
               </div>
-              <p className="text-[10px] text-muted-foreground mb-2">
-                Use this prompt with any AI (Midjourney, DALL-E, ComfyUI, Stable Diffusion, etc.) to recreate the same result.
-              </p>
-              <div className="bg-secondary rounded-xl p-3 max-h-48 overflow-y-auto">
-                <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono">{fullPrompt}</p>
-              </div>
+              <div className="bg-secondary rounded-xl p-3 max-h-48 overflow-y-auto"><p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono">{fullPrompt}</p></div>
             </Card>
           )}
         </div>
@@ -796,41 +522,24 @@ export default function GeneratePage() {
   );
 }
 
-// Reusable row for swap controls — each aspect (face, outfit, pose, bg)
 function SwapRow({ icon, label, value, onChange, options, customValue, onCustomChange, customPlaceholder, last }: {
-  icon: React.ReactNode;
-  label: string;
-  value: SwapSource;
-  onChange: (v: SwapSource) => void;
-  options: { id: SwapSource; label: string }[];
-  customValue?: string;
-  onCustomChange?: (v: string) => void;
-  customPlaceholder?: string;
-  last?: boolean;
+  icon: React.ReactNode; label: string; value: SwapSource; onChange: (v: SwapSource) => void;
+  options: { id: SwapSource; label: string }[]; customValue?: string; onCustomChange?: (v: string) => void; customPlaceholder?: string; last?: boolean;
 }) {
   return (
     <div className={last ? '' : 'mb-3 pb-3 border-b border-border'}>
       <p className="text-[11px] font-medium mb-1.5 flex items-center gap-1.5">{icon} {label}</p>
       <div className="flex gap-1.5">
         {options.map((opt) => (
-          <button
-            key={opt.id}
-            onClick={() => onChange(opt.id)}
-            className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all cursor-pointer border text-center
-              ${value === opt.id ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-secondary border-transparent text-muted-foreground hover:text-foreground'}`}
-          >
+          <button key={opt.id} onClick={() => onChange(opt.id)}
+            className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-all cursor-pointer border text-center ${value === opt.id ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-secondary border-transparent text-muted-foreground hover:text-foreground'}`}>
             {opt.label}
           </button>
         ))}
       </div>
       {value === 'custom' && onCustomChange && (
-        <input
-          type="text"
-          placeholder={customPlaceholder}
-          value={customValue || ''}
-          onChange={(e) => onCustomChange(e.target.value)}
-          className="w-full mt-2 h-8 px-3 rounded-lg bg-input border border-border text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        />
+        <input type="text" placeholder={customPlaceholder} value={customValue || ''} onChange={(e) => onCustomChange(e.target.value)}
+          className="w-full mt-2 h-8 px-3 rounded-lg bg-input border border-border text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
       )}
     </div>
   );

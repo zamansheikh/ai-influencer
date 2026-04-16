@@ -3,31 +3,32 @@
 import { useState } from 'react';
 import { ChevronDown, Shuffle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { SCENE_CATEGORIES, ALL_PRESETS } from '@/lib/scene-presets';
+import { SCENE_CATEGORIES, ALL_PRESETS, type ScenePreset } from '@/lib/scene-presets';
 
 interface ScenePickerProps {
-  onSelect: (prompt: string) => void;
+  onSelect: (preset: ScenePreset) => void;
+  mode?: 'full' | 'scene-only';  // scene-only = only set the scene field (for swap)
 }
 
-export function ScenePicker({ onSelect }: ScenePickerProps) {
+export function ScenePicker({ onSelect, mode = 'full' }: ScenePickerProps) {
   const [expanded, setExpanded] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   const randomScene = () => {
     const preset = ALL_PRESETS[Math.floor(Math.random() * ALL_PRESETS.length)];
-    onSelect(preset.prompt);
+    onSelect(preset);
   };
 
   return (
     <div>
-      {/* Quick row + expand toggle */}
       <div className="flex items-center justify-between mb-2">
-        <p className="text-[11px] text-muted-foreground font-medium">Scene Presets</p>
+        <p className="text-[11px] text-muted-foreground font-medium">
+          {mode === 'scene-only' ? 'Background Presets' : 'Scene Presets'}
+        </p>
         <div className="flex gap-1.5">
           <button
             onClick={randomScene}
             className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-primary hover:bg-primary/10 transition-colors cursor-pointer"
-            title="Random scene"
           >
             <Shuffle className="w-3 h-3" /> Random
           </button>
@@ -35,23 +36,23 @@ export function ScenePicker({ onSelect }: ScenePickerProps) {
             onClick={() => setExpanded(!expanded)}
             className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
-            {expanded ? 'Less' : `All ${ALL_PRESETS.length} scenes`}
+            {expanded ? 'Less' : `All ${ALL_PRESETS.length}`}
             <ChevronDown className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
           </button>
         </div>
       </div>
 
-      {/* Quick presets (always visible) — first 6 from mixed categories */}
       {!expanded && (
         <div className="flex flex-wrap gap-1.5">
-          {['Coffee shop selfie', 'Corporate headshot', 'Beach paradise', 'Gym workout', 'Neon portrait', 'Editorial shoot'].map((label) => {
+          {['Coffee shop selfie', 'Corporate headshot', 'Beach paradise', 'Gym workout', 'Neon portrait', 'Pohela Boishakh'].map((label) => {
             const preset = ALL_PRESETS.find((p) => p.label === label);
             if (!preset) return null;
             return (
               <button
                 key={label}
-                onClick={() => onSelect(preset.prompt)}
+                onClick={() => onSelect(preset)}
                 className="px-2.5 py-1 rounded-lg text-[11px] bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
+                title={preset.scene}
               >
                 {label}
               </button>
@@ -60,7 +61,6 @@ export function ScenePicker({ onSelect }: ScenePickerProps) {
         </div>
       )}
 
-      {/* Expanded: full category browser */}
       <AnimatePresence>
         {expanded && (
           <motion.div
@@ -70,7 +70,6 @@ export function ScenePicker({ onSelect }: ScenePickerProps) {
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            {/* Category tabs */}
             <div className="flex gap-1.5 overflow-x-auto pb-2 mb-2 scrollbar-none">
               {SCENE_CATEGORIES.map((cat) => (
                 <button
@@ -85,7 +84,6 @@ export function ScenePicker({ onSelect }: ScenePickerProps) {
               ))}
             </div>
 
-            {/* Presets grid */}
             <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
               {(activeCategory
                 ? SCENE_CATEGORIES.find((c) => c.id === activeCategory)?.presets || []
@@ -93,9 +91,9 @@ export function ScenePicker({ onSelect }: ScenePickerProps) {
               ).map((preset) => (
                 <button
                   key={preset.label}
-                  onClick={() => onSelect(preset.prompt)}
+                  onClick={() => onSelect(preset)}
                   className="px-2.5 py-1.5 rounded-lg text-[11px] bg-secondary text-muted-foreground hover:text-foreground hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
-                  title={preset.prompt}
+                  title={preset.scene}
                 >
                   {preset.label}
                 </button>
