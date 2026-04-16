@@ -5,15 +5,7 @@ import { v4 as uuid } from 'uuid';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Zap,
-  Image as ImageIcon,
-  Video,
-  Megaphone,
-  Copy,
-  Check,
-  Sparkles,
-  ArrowRight,
-  ShoppingBag,
+  Zap, Image as ImageIcon, Video, Megaphone, Copy, Check, Sparkles, ShoppingBag, Upload, X, Camera,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,9 +13,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs } from '@/components/ui/tabs';
+import { EmptyState } from '@/components/ui/empty-state';
 import { db, type GeneratedContent } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
-import { generateContent } from '@/lib/ai-providers';
+import { generateContent, type SponsorshipData } from '@/lib/ai-providers';
+import { copyToClipboard } from '@/lib/utils';
 import Link from 'next/link';
 
 const contentTabs = [
@@ -33,11 +27,11 @@ const contentTabs = [
 
 const presetPrompts = [
   { label: 'Casual selfie', prompt: 'Taking a casual selfie in a trendy coffee shop, natural smile, warm lighting' },
-  { label: 'Outdoor portrait', prompt: 'Standing in a beautiful park during golden hour, professional portrait style' },
+  { label: 'Outdoor', prompt: 'Standing in a beautiful park during golden hour, professional portrait' },
   { label: 'Fitness', prompt: 'At the gym, athletic wear, confident pose, dynamic lighting' },
-  { label: 'Business', prompt: 'Professional headshot in a modern office, wearing business attire' },
-  { label: 'Travel', prompt: 'Standing in front of a stunning mountain landscape, travel outfit, adventurous vibe' },
-  { label: 'Night out', prompt: 'At a stylish rooftop bar at night, city skyline in background, elegant outfit' },
+  { label: 'Business', prompt: 'Professional headshot in a modern office, business attire' },
+  { label: 'Travel', prompt: 'Stunning mountain landscape, travel outfit, adventurous vibe' },
+  { label: 'Night out', prompt: 'Stylish rooftop bar at night, city skyline, elegant outfit' },
 ];
 
 export default function GeneratePage() {
@@ -47,138 +41,119 @@ export default function GeneratePage() {
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState('social');
 
   // Sponsorship
   const [sponsorBrand, setSponsorBrand] = useState('');
   const [sponsorProduct, setSponsorProduct] = useState('');
   const [sponsorDesc, setSponsorDesc] = useState('');
+  const [productImages, setProductImages] = useState<string[]>([]);
 
-  const [activeTab, setActiveTab] = useState('social');
+  const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setProductImages((prev) => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const removeProductImage = (index: number) => {
+    setProductImages((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleGenerate = async () => {
-    if (!selectedCharacter) {
-      toast.error('Please select a character first');
-      return;
-    }
-    if (!prompt.trim()) {
-      toast.error('Please enter a prompt');
-      return;
-    }
-    if (!activeProvider) {
-      toast.error('Please configure an AI provider in Settings');
-      return;
-    }
+    if (!selectedCharacter) { toast.error('Select a character first'); return; }
+    if (!prompt.trim()) { toast.error('Enter a prompt'); return; }
+    if (!activeProvider) { toast.error('Configure an AI provider in Settings'); return; }
 
     setGenerating(true);
     try {
-      const sponsorship =
-        activeTab === 'sponsored' && sponsorBrand
-          ? { brand: sponsorBrand, product: sponsorProduct, description: sponsorDesc }
-          : undefined;
+      const sponsorship = activeTab === 'sponsored' && sponsorBrand
+        ? { brand: sponsorBrand, product: sponsorProduct, description: sponsorDesc, productImages: productImages.length > 0 ? productImages : undefined }
+        : undefined;
 
-      const res = await generateContent(
-        activeProvider,
-        selectedCharacter.consistencyPrompt,
-        prompt,
-        sponsorship
-      );
-
+      const res = await generateContent(activeProvider, selectedCharacter.consistencyPrompt, prompt, sponsorship);
       setResult(res.result || res.prompt);
 
-      // Save to DB
       const content: GeneratedContent = {
         id: uuid(),
         characterId: selectedCharacter.id,
         type: contentType,
         prompt: res.prompt,
         result: res.result || res.prompt,
-        sponsorship: sponsorship
-          ? { enabled: true, ...sponsorship }
-          : { enabled: false },
+        sponsorship: sponsorship ? { enabled: true, ...sponsorship } : { enabled: false },
         createdAt: Date.now(),
       };
       await db.generatedContent.add(content);
-
       toast.success('Content generated!');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Generation failed';
-      toast.error(msg);
+      toast.error(err instanceof Error ? err.message : 'Generation failed');
     } finally {
       setGenerating(false);
     }
   };
 
-  const copyResult = async () => {
+  const handleCopyResult = async () => {
     if (result) {
-      await navigator.clipboard.writeText(result);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      const ok = await copyToClipboard(result);
+      if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
     }
   };
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
+    <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Generate Content</h1>
-        <p className="text-sm text-muted-foreground">
-          Create stunning photos and videos with your AI influencer characters
-        </p>
+        <h1 className="text-xl sm:text-2xl font-bold">Generate Content</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">Create photos and videos with your AI influencer characters</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Configuration */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        {/* Left: Config */}
         <div className="lg:col-span-2 space-y-4">
           {/* Character Selection */}
           <Card>
-            <h2 className="text-sm font-semibold mb-4">Select Character</h2>
+            <h2 className="text-sm font-semibold mb-3">Select Character</h2>
             {characters.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
                 {characters.map((char) => (
                   <button
                     key={char.id}
                     onClick={() => setSelectedCharacter(char)}
-                    className={`relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer
-                      ${
-                        selectedCharacter?.id === char.id
-                          ? 'border-primary ring-2 ring-primary/20'
-                          : 'border-border hover:border-primary/30'
-                      }`}
+                    className={`relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer aspect-square
+                      ${selectedCharacter?.id === char.id
+                        ? 'border-primary ring-2 ring-primary/20'
+                        : 'border-border hover:border-primary/30'}`}
                   >
-                    <img
-                      src={char.avatar}
-                      alt={char.name}
-                      className="w-full h-24 object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                    <span className="absolute bottom-1.5 left-2 text-xs font-medium text-white">
+                    <img src={char.avatar} alt={char.name} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-linear-to-t from-black/80 to-transparent" />
+                    <span className="absolute bottom-1 left-1.5 right-1 text-[10px] font-medium text-white truncate">
                       {char.name}
                     </span>
                     {selectedCharacter?.id === char.id && (
-                      <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
-                        <Check className="w-3 h-3 text-white" />
+                      <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                        <Check className="w-2.5 h-2.5 text-white" />
                       </div>
                     )}
                   </button>
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8">
-                <p className="text-sm text-muted-foreground mb-3">
-                  No characters yet. Create one first!
-                </p>
-                <Link href="/create">
-                  <Button size="sm">Create Character</Button>
-                </Link>
+              <div className="text-center py-6">
+                <p className="text-xs text-muted-foreground mb-3">No characters yet</p>
+                <Link href="/create"><Button size="sm">Create Character</Button></Link>
               </div>
             )}
           </Card>
 
-          {/* Content Type */}
+          {/* Content Tabs */}
           <Tabs tabs={contentTabs} defaultTab="social" onChange={setActiveTab}>
             {(tab) => (
               <div className="space-y-4">
-                {/* Prompt */}
                 <Card>
                   <Textarea
                     label="Scene Description"
@@ -186,91 +161,135 @@ export default function GeneratePage() {
                     placeholder="Describe the scene, pose, setting, mood..."
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    rows={4}
+                    rows={3}
                   />
-
-                  {/* Presets */}
-                  <div className="mt-3">
-                    <p className="text-xs text-muted-foreground mb-2">Quick presets:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {presetPrompts.map((preset) => (
+                  <div className="mt-2.5">
+                    <p className="text-[11px] text-muted-foreground mb-1.5">Quick presets:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {presetPrompts.map((p) => (
                         <button
-                          key={preset.label}
-                          onClick={() => setPrompt(preset.prompt)}
-                          className="px-3 py-1 rounded-lg text-xs bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          key={p.label}
+                          onClick={() => setPrompt(p.prompt)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] bg-secondary text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                         >
-                          {preset.label}
+                          {p.label}
                         </button>
                       ))}
                     </div>
                   </div>
                 </Card>
 
-                {/* Sponsorship fields */}
                 {tab === 'sponsored' && (
                   <Card glow>
-                    <div className="flex items-center gap-2 mb-4">
+                    <div className="flex items-center gap-2 mb-3">
                       <ShoppingBag className="w-4 h-4 text-primary" />
-                      <h3 className="text-sm font-semibold">Sponsorship Details</h3>
+                      <h3 className="text-sm font-semibold">Sponsorship</h3>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <Input
-                        label="Brand Name"
-                        id="brand"
-                        placeholder="e.g., Nike"
-                        value={sponsorBrand}
-                        onChange={(e) => setSponsorBrand(e.target.value)}
-                      />
-                      <Input
-                        label="Product"
-                        id="product"
-                        placeholder="e.g., Air Max 2026"
-                        value={sponsorProduct}
-                        onChange={(e) => setSponsorProduct(e.target.value)}
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Input label="Brand" id="brand" placeholder="e.g., Nike" value={sponsorBrand} onChange={(e) => setSponsorBrand(e.target.value)} />
+                      <Input label="Product" id="product" placeholder="e.g., Air Max 2026" value={sponsorProduct} onChange={(e) => setSponsorProduct(e.target.value)} />
                     </div>
-                    <div className="mt-4">
-                      <Textarea
-                        label="Product Description / Notes"
-                        id="sponsorDesc"
-                        placeholder="Any specific instructions for the product placement..."
-                        value={sponsorDesc}
-                        onChange={(e) => setSponsorDesc(e.target.value)}
-                        rows={2}
-                      />
+                    <div className="mt-3">
+                      <Textarea label="Notes" id="sponsorDesc" placeholder="Product placement instructions..." value={sponsorDesc} onChange={(e) => setSponsorDesc(e.target.value)} rows={2} />
+                    </div>
+
+                    {/* Product Photo Upload */}
+                    <div className="mt-4 pt-4 border-t border-border">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <div>
+                          <p className="text-sm font-medium flex items-center gap-1.5">
+                            <Camera className="w-4 h-4 text-primary" />
+                            Product Photos
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            Upload product images for AI reference (supported by Gemini, GPT-4o, Qwen)
+                          </p>
+                        </div>
+                        <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">
+                          <Upload className="w-3.5 h-3.5" />
+                          Add Photos
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handleProductImageUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
+                      {productImages.length > 0 && (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mt-2">
+                          {productImages.map((img, i) => (
+                            <div key={i} className="relative group rounded-xl overflow-hidden border border-border aspect-square">
+                              <img src={img} alt={`Product ${i + 1}`} className="w-full h-full object-cover" />
+                              <button
+                                onClick={() => removeProductImage(i)}
+                                className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-destructive"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                              <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[9px] text-white text-center py-0.5">
+                                #{i + 1}
+                              </div>
+                            </div>
+                          ))}
+                          {/* Add more button */}
+                          <label className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border hover:border-primary/40 transition-colors cursor-pointer aspect-square">
+                            <Upload className="w-4 h-4 text-muted-foreground" />
+                            <span className="text-[9px] text-muted-foreground mt-1">Add more</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              onChange={handleProductImageUpload}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      {productImages.length === 0 && (
+                        <label className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl border-2 border-dashed border-border hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer mt-2">
+                          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                            <Camera className="w-5 h-5 text-primary/60" />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-xs font-medium text-muted-foreground">Drop product photos here</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">PNG, JPG, WebP</p>
+                          </div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handleProductImageUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
                     </div>
                   </Card>
                 )}
 
-                {/* Content type toggle */}
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setContentType('image')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer border
-                      ${contentType === 'image' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
-                  >
-                    <ImageIcon className="w-4 h-4" />
-                    Photo
-                  </button>
-                  <button
-                    onClick={() => setContentType('video')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer border
-                      ${contentType === 'video' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
-                  >
-                    <Video className="w-4 h-4" />
-                    Video
-                  </button>
+                {/* Content type */}
+                <div className="flex gap-2">
+                  {[
+                    { type: 'image' as const, icon: ImageIcon, label: 'Photo' },
+                    { type: 'video' as const, icon: Video, label: 'Video' },
+                  ].map(({ type, icon: Icon, label }) => (
+                    <button
+                      key={type}
+                      onClick={() => setContentType(type)}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer border
+                        ${contentType === type ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                    >
+                      <Icon className="w-4 h-4" /> {label}
+                    </button>
+                  ))}
                 </div>
 
-                <Button
-                  onClick={handleGenerate}
-                  loading={generating}
-                  className="w-full"
-                  size="lg"
-                  disabled={!selectedCharacter || !prompt.trim()}
-                >
-                  <Zap className="w-5 h-5" />
-                  {generating ? 'Generating...' : 'Generate Content'}
+                <Button onClick={handleGenerate} loading={generating} className="w-full" size="lg" disabled={!selectedCharacter || !prompt.trim()}>
+                  <Zap className="w-5 h-5" /> {generating ? 'Generating...' : 'Generate Content'}
                 </Button>
               </div>
             )}
@@ -278,15 +297,12 @@ export default function GeneratePage() {
         </div>
 
         {/* Right: Result */}
-        <div className="space-y-4">
-          <Card className="sticky top-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold">Generated Output</h2>
+        <div>
+          <Card className="lg:sticky lg:top-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold">Output</h2>
               {result && (
-                <button
-                  onClick={copyResult}
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer"
-                >
+                <button onClick={handleCopyResult} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer">
                   {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                   {copied ? 'Copied' : 'Copy'}
                 </button>
@@ -295,71 +311,36 @@ export default function GeneratePage() {
 
             <AnimatePresence mode="wait">
               {generating ? (
-                <motion.div
-                  key="generating"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="flex flex-col items-center py-12"
-                >
-                  <div className="animate-shimmer w-full h-64 rounded-xl bg-secondary" />
-                  <p className="text-xs text-muted-foreground mt-3 animate-pulse">
-                    Generating content...
-                  </p>
+                <motion.div key="gen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+                  <div className="animate-shimmer w-full h-48 sm:h-64 rounded-xl bg-secondary" />
+                  <p className="text-xs text-muted-foreground text-center animate-pulse">Generating...</p>
                 </motion.div>
               ) : result ? (
-                <motion.div
-                  key="result"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                >
+                <motion.div key="result" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
                   {result.startsWith('http') || result.startsWith('data:') ? (
-                    <img
-                      src={result}
-                      alt="Generated content"
-                      className="w-full rounded-xl"
-                    />
+                    <img src={result} alt="Generated" className="w-full rounded-xl" />
                   ) : (
-                    <div className="bg-secondary rounded-xl p-4">
+                    <div className="bg-secondary rounded-xl p-4 max-h-72 overflow-y-auto">
                       <Badge className="mb-2">Generated Prompt</Badge>
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                        {result}
-                      </p>
+                      <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{result}</p>
                     </div>
                   )}
                 </motion.div>
               ) : (
-                <motion.div
-                  key="empty"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex flex-col items-center py-12 text-center"
-                >
-                  <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
-                    <Sparkles className="w-8 h-8 text-primary/40" />
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Your generated content will appear here
-                  </p>
-                </motion.div>
+                <EmptyState
+                  icon={<Sparkles className="w-8 h-8 text-primary/30" />}
+                  title="Ready"
+                  description="Generated content appears here"
+                />
               )}
             </AnimatePresence>
 
-            {/* Character preview */}
             {selectedCharacter && (
-              <div className="mt-4 pt-4 border-t border-border">
-                <div className="flex items-center gap-3">
-                  <img
-                    src={selectedCharacter.avatar}
-                    alt={selectedCharacter.name}
-                    className="w-10 h-10 rounded-xl object-cover"
-                  />
-                  <div>
-                    <p className="text-sm font-medium">{selectedCharacter.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {selectedCharacter.analysis ? 'Analyzed' : 'No analysis'}
-                    </p>
-                  </div>
+              <div className="mt-4 pt-3 border-t border-border flex items-center gap-2.5">
+                <img src={selectedCharacter.avatar} alt={selectedCharacter.name} className="w-9 h-9 rounded-lg object-cover" />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium truncate">{selectedCharacter.name}</p>
+                  <p className="text-[10px] text-muted-foreground">{selectedCharacter.analysis ? 'Analyzed' : 'No analysis'}</p>
                 </div>
               </div>
             )}

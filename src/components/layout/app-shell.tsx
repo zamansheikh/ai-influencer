@@ -24,14 +24,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [setCharacters, setProviders, setActiveProvider]);
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex min-h-screen">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-7xl mx-auto p-6 lg:p-8">{children}</div>
+      <main className="flex-1 overflow-y-auto pt-14 md:pt-0 pb-20 md:pb-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
+          {children}
+        </div>
       </main>
       <Toaster
         theme="dark"
-        position="bottom-right"
+        position="top-center"
         toastOptions={{
           style: {
             background: 'var(--card)',

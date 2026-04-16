@@ -300,38 +300,60 @@ async function analyzeWithCustom(provider: AIProvider, imageBase64: string) {
   };
 }
 
+export interface SponsorshipData {
+  brand: string;
+  product: string;
+  description: string;
+  productImages?: string[]; // base64 data URLs
+}
+
 export async function generateContent(
   provider: AIProvider,
   characterPrompt: string,
   userPrompt: string,
-  sponsorship?: { brand: string; product: string; description: string }
+  sponsorship?: SponsorshipData
 ) {
   let fullPrompt = characterPrompt;
 
   if (sponsorship) {
     fullPrompt += `\n\nThe person is promoting ${sponsorship.brand}'s ${sponsorship.product}. ${sponsorship.description}. Show the product naturally integrated into the scene. The person should be interacting with or showcasing the product in a natural, influencer-style way.`;
+    if (sponsorship.productImages?.length) {
+      fullPrompt += `\n\nReference product images are attached. Match the exact product appearance, logo, colors, and packaging shown in these reference photos.`;
+    }
   }
 
   fullPrompt += `\n\nScene: ${userPrompt}`;
 
+  const productImages = sponsorship?.productImages || [];
+
   switch (provider.provider) {
     case 'gemini':
-      return generateWithGemini(provider, fullPrompt);
+      return generateWithGemini(provider, fullPrompt, productImages);
     case 'openai':
-      return generateWithOpenAI(provider, fullPrompt);
+      return generateWithOpenAI(provider, fullPrompt, productImages);
     case 'qwen':
-      return generateWithQwen(provider, fullPrompt);
+      return generateWithQwen(provider, fullPrompt, productImages);
     default:
       return { prompt: fullPrompt, result: null };
   }
 }
 
-async function generateWithGemini(provider: AIProvider, prompt: string) {
+async function generateWithGemini(provider: AIProvider, prompt: string, productImages: string[]) {
   const model = provider.model || 'gemini-2.5-flash';
   const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${provider.apiKey}`;
 
+  // Build parts with text + optional product images
+  const parts: Record<string, unknown>[] = [
+    { text: `Generate an image based on this description:\n\n${prompt}` },
+  ];
+  for (const img of productImages) {
+    const base64Data = img.includes(',') ? img.split(',')[1] : img;
+    const mimeType = img.includes('data:') ? img.split(';')[0].split(':')[1] : 'image/jpeg';
+    parts.push({ inlineData: { mimeType, data: base64Data } });
+  }
+
   const data = await proxyFetch(targetUrl, {}, {
-    contents: [{ parts: [{ text: `Generate an image based on this description:\n\n${prompt}` }] }],
+    contents: [{ parts }],
     generationConfig: { responseModalities: ['TEXT'] },
   });
 
@@ -341,8 +363,33 @@ async function generateWithGemini(provider: AIProvider, prompt: string) {
   };
 }
 
-async function generateWithOpenAI(provider: AIProvider, prompt: string) {
+async function generateWithOpenAI(provider: AIProvider, prompt: string, productImages: string[]) {
   const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
+
+  // If product images provided, use chat completions with vision for richer prompt
+  if (productImages.length > 0) {
+    const content: Record<string, unknown>[] = [
+      { type: 'text', text: `Generate an extremely detailed image prompt incorporating the product shown in the attached images. Base description:\n\n${prompt}\n\nReturn only the refined prompt.` },
+    ];
+    for (const img of productImages) {
+      content.push({ type: 'image_url', image_url: { url: img } });
+    }
+
+    const data = await proxyFetch(
+      `${baseUrl}/chat/completions`,
+      { Authorization: `Bearer ${provider.apiKey}` },
+      {
+        model: provider.model || 'gpt-4o',
+        messages: [{ role: 'user', content }],
+        temperature: 0.7,
+      }
+    );
+
+    return {
+      prompt,
+      result: data.choices?.[0]?.message?.content || prompt,
+    };
+  }
 
   const data = await proxyFetch(
     `${baseUrl}/images/generations`,
@@ -362,9 +409,28 @@ async function generateWithOpenAI(provider: AIProvider, prompt: string) {
   };
 }
 
-async function generateWithQwen(provider: AIProvider, prompt: string) {
+async function generateWithQwen(provider: AIProvider, prompt: string, productImages: string[]) {
   const baseUrl = provider.baseUrl || 'https://www.dialagram.me/router/v1';
   const model = provider.model || 'qwen-3.6-plus-thinking';
+
+  // Build content with optional product images
+  const content: (string | Record<string, unknown>)[] = [];
+  if (productImages.length > 0) {
+    content.push({
+      type: 'text',
+      text: `Generate an extremely detailed image prompt incorporating the product shown in the attached images. Base description:\n\n${prompt}\n\nReturn only the refined prompt.`,
+    });
+    for (const img of productImages) {
+      content.push({ type: 'image_url', image_url: { url: img } });
+    }
+  }
+
+  const messages = productImages.length > 0
+    ? [{ role: 'user', content }]
+    : [{
+        role: 'user',
+        content: `Generate an extremely detailed image prompt based on this description. Return only the refined prompt text, nothing else:\n\n${prompt}`,
+      }];
 
   const data = await proxyFetch(
     `${baseUrl}/chat/completions`,
@@ -372,12 +438,7 @@ async function generateWithQwen(provider: AIProvider, prompt: string) {
     {
       model,
       stream: false,
-      messages: [
-        {
-          role: 'user',
-          content: `Generate an extremely detailed image prompt based on this description. Return only the refined prompt text, nothing else:\n\n${prompt}`,
-        },
-      ],
+      messages,
       temperature: 0.7,
     }
   );
