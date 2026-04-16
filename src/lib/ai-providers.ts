@@ -238,22 +238,33 @@ async function generateRefWithGemini(provider: AIProvider, prompt: string, origi
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${provider.apiKey}`;
   const { data: base64Data, mimeType } = extractBase64(originalImage);
 
-  const data = await proxyFetch(url, {}, {
+  const payload = {
     contents: [{ parts: [
       { text: prompt },
       { inlineData: { mimeType, data: base64Data } },
     ]}],
     generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
-  });
+  };
 
-  // Gemini returns image in parts
-  const parts = data.candidates?.[0]?.content?.parts || [];
-  for (const part of parts) {
-    if (part.inlineData) {
-      return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+  // Try with IMAGE output first; if model doesn't support it, return null
+  try {
+    const data = await proxyFetch(url, {}, payload);
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      if (part.inlineData) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
     }
+    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    // "only supports text output" = model can't generate images
+    if (msg.includes('text output') || msg.includes('INVALID_ARGUMENT') || msg.includes('not supported')) {
+      console.warn(`[Ref Image] ${model} does not support image output, skipping.`);
+      return null;
+    }
+    throw err; // re-throw unexpected errors
   }
-  return null;
 }
 
 async function generateRefWithOpenAI(provider: AIProvider, prompt: string, _originalImage: string) {
@@ -301,10 +312,11 @@ export interface GenerateOptions {
   referenceImage?: string;    // AI-generated face reference
   originalAvatar?: string;    // original uploaded photo
   sponsorship?: SponsorshipData;
+  forceTextOnly?: boolean;    // Force text prompt output even if model can gen images
 }
 
 export async function generateContent(opts: GenerateOptions) {
-  const { provider, consistencyPrompt, userPrompt, referenceImage, originalAvatar, sponsorship } = opts;
+  const { provider, consistencyPrompt, userPrompt, referenceImage, originalAvatar, sponsorship, forceTextOnly } = opts;
   const caps = getModelCapabilities(provider.model);
 
   // Build the text prompt
@@ -329,11 +341,13 @@ export async function generateContent(opts: GenerateOptions) {
     images.push(...sponsorship.productImages);
   }
 
+  const wantMedia = !forceTextOnly;
+
   switch (provider.provider) {
     case 'gemini':
-      return genWithGemini(provider, fullPrompt, images, caps.imageGeneration);
+      return genWithGemini(provider, fullPrompt, images, wantMedia && caps.imageGeneration);
     case 'openai':
-      return genWithOpenAI(provider, fullPrompt, images, caps.imageGeneration);
+      return genWithOpenAI(provider, fullPrompt, images, wantMedia && caps.imageGeneration);
     case 'qwen':
       return genWithQwen(provider, fullPrompt, images);
     default:
@@ -347,7 +361,6 @@ async function genWithGemini(provider: AIProvider, prompt: string, images: strin
 
   const parts: Record<string, unknown>[] = [];
 
-  // Add face reference context
   if (images.length > 0) {
     parts.push({ text: 'Reference images for the person and/or products (use these for visual consistency):' });
     for (const img of images) {
@@ -356,30 +369,54 @@ async function genWithGemini(provider: AIProvider, prompt: string, images: strin
     }
   }
 
-  parts.push({ text: (canGenImage ? 'Generate an image' : 'Generate a detailed image prompt') + ` based on this description:\n\n${prompt}` });
-
-  const data = await proxyFetch(url, {}, {
-    contents: [{ parts }],
-    generationConfig: {
-      responseModalities: canGenImage ? ['IMAGE', 'TEXT'] : ['TEXT'],
-    },
-  });
-
-  // Check if response contains generated image
-  const resParts = data.candidates?.[0]?.content?.parts || [];
-  for (const part of resParts) {
-    if (part.inlineData) {
-      return {
-        prompt,
-        result: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
-        type: 'image' as const,
-      };
+  // If model claims image gen, try IMAGE output first
+  if (canGenImage) {
+    parts.push({ text: `Generate an image based on this description:\n\n${prompt}` });
+    try {
+      const data = await proxyFetch(url, {}, {
+        contents: [{ parts }],
+        generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+      });
+      const resParts = data.candidates?.[0]?.content?.parts || [];
+      for (const part of resParts) {
+        if (part.inlineData) {
+          return {
+            prompt,
+            result: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+            type: 'image' as const,
+          };
+        }
+      }
+      // Got text back instead of image
+      return { prompt, result: resParts[0]?.text || prompt, type: 'prompt' as const };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('text output') || msg.includes('INVALID_ARGUMENT') || msg.includes('not supported')) {
+        // Model doesn't actually support image output — fall through to text-only
+        console.warn(`[GenImage] ${model} rejected IMAGE modality, falling back to text.`);
+      } else {
+        throw err;
+      }
     }
   }
 
+  // Text-only fallback
+  // Replace the last text part if we already added "Generate an image..."
+  const lastPart = parts[parts.length - 1];
+  if (lastPart && typeof lastPart.text === 'string' && lastPart.text.startsWith('Generate an image')) {
+    parts[parts.length - 1] = { text: `Generate a detailed image prompt based on this description:\n\n${prompt}` };
+  } else {
+    parts.push({ text: `Generate a detailed image prompt based on this description:\n\n${prompt}` });
+  }
+
+  const data = await proxyFetch(url, {}, {
+    contents: [{ parts }],
+    generationConfig: { responseModalities: ['TEXT'] },
+  });
+
   return {
     prompt,
-    result: resParts[0]?.text || prompt,
+    result: data.candidates?.[0]?.content?.parts?.[0]?.text || prompt,
     type: 'prompt' as const,
   };
 }

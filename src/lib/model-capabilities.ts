@@ -196,36 +196,36 @@ const MODEL_DB: Record<string, ModelCapabilities> = {
 
   // ── Qwen (via Dialagram) ──
   'qwen-3.6-plus-thinking': {
-    visionInput: false,
+    visionInput: true,
     imageGeneration: false,
     videoGeneration: false,
     jsonMode: true,
-    multiImageInput: false,
-    reasoning: 'Text-only thinking model — no vision input, no image gen',
+    multiImageInput: true,
+    reasoning: 'Multimodal thinking model — vision + analysis, no image gen',
   },
   'qwen-3.6-plus': {
-    visionInput: false,
+    visionInput: true,
     imageGeneration: false,
     videoGeneration: false,
     jsonMode: true,
-    multiImageInput: false,
-    reasoning: 'Text-only Qwen — no vision input, no image gen',
+    multiImageInput: true,
+    reasoning: 'Multimodal Qwen — vision + analysis, no image gen',
   },
   'qwen-3.5-plus-thinking': {
-    visionInput: false,
+    visionInput: true,
     imageGeneration: false,
     videoGeneration: false,
     jsonMode: true,
-    multiImageInput: false,
-    reasoning: 'Text-only thinking model — no vision, no image gen',
+    multiImageInput: true,
+    reasoning: 'Multimodal thinking model — vision + analysis, no image gen',
   },
   'qwen-3.5-plus': {
-    visionInput: false,
+    visionInput: true,
     imageGeneration: false,
     videoGeneration: false,
     jsonMode: true,
-    multiImageInput: false,
-    reasoning: 'Text-only Qwen — no vision, no image gen',
+    multiImageInput: true,
+    reasoning: 'Multimodal Qwen — vision + analysis, no image gen',
   },
 };
 
@@ -252,7 +252,7 @@ export function getModelCapabilities(modelId: string): ModelCapabilities {
   if (lower.includes('gemini')) return { ...DEFAULT_CAPS, visionInput: true, jsonMode: true, reasoning: 'Unknown Gemini model — assuming vision support' };
   if (lower.includes('gpt')) return { ...DEFAULT_CAPS, visionInput: true, jsonMode: true, reasoning: 'Unknown GPT model — assuming vision support' };
   if (lower.includes('claude')) return { ...DEFAULT_CAPS, visionInput: true, jsonMode: true, reasoning: 'Unknown Claude model — assuming vision support' };
-  if (lower.includes('qwen')) return { ...DEFAULT_CAPS, jsonMode: true, reasoning: 'Unknown Qwen model — text-only assumed' };
+  if (lower.includes('qwen')) return { ...DEFAULT_CAPS, visionInput: true, multiImageInput: true, jsonMode: true, reasoning: 'Unknown Qwen model — assuming vision support' };
   if (lower.includes('veo')) return { ...DEFAULT_CAPS, visionInput: true, videoGeneration: true, reasoning: 'Unknown Veo model — assuming video generation' };
   if (lower.includes('imagen')) return { ...DEFAULT_CAPS, visionInput: true, imageGeneration: true, reasoning: 'Unknown Imagen model — assuming image generation' };
 

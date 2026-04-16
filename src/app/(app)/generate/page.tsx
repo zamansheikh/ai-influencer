@@ -40,6 +40,7 @@ export default function GeneratePage() {
   const { characters, selectedCharacter, setSelectedCharacter, activeProvider } = useAppStore();
   const [prompt, setPrompt] = useState('');
   const [contentType, setContentType] = useState<'image' | 'video'>('image');
+  const [outputFormat, setOutputFormat] = useState<'media' | 'prompt'>('media'); // media = image/video, prompt = text
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [resultType, setResultType] = useState<'image' | 'prompt'>('prompt');
@@ -47,15 +48,18 @@ export default function GeneratePage() {
   const [activeTab, setActiveTab] = useState('social');
 
   const caps = activeProvider ? getModelCapabilities(activeProvider.model) : null;
+  const canGenMedia = contentType === 'image' ? caps?.imageGeneration : caps?.videoGeneration;
 
   // Auto-switch content type based on model capabilities
   useEffect(() => {
     if (!caps) return;
     if (caps.videoGeneration && !caps.imageGeneration) {
       setContentType('video');
-    } else if (caps.imageGeneration && !caps.videoGeneration) {
+    } else if (!caps.videoGeneration) {
       setContentType('image');
     }
+    // Reset output to media if model supports it
+    setOutputFormat(caps.imageGeneration || caps.videoGeneration ? 'media' : 'prompt');
   }, [activeProvider?.id, caps?.videoGeneration, caps?.imageGeneration]);
 
   // Sponsorship
@@ -99,6 +103,7 @@ export default function GeneratePage() {
         referenceImage: selectedCharacter.referenceImage,
         originalAvatar: selectedCharacter.avatar,
         sponsorship,
+        forceTextOnly: outputFormat === 'prompt',
       });
       setResult(res.result || res.prompt);
       setResultType(res.type || 'prompt');
@@ -337,40 +342,72 @@ export default function GeneratePage() {
                   </Card>
                 )}
 
-                {/* Content type */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setContentType('image')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border
-                      ${!caps?.videoGeneration || caps?.imageGeneration ? 'cursor-pointer' : 'cursor-pointer'}
-                      ${contentType === 'image' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
-                  >
-                    <ImageIcon className="w-4 h-4" /> Photo
-                    {caps?.imageGeneration && <Badge variant="success" className="text-[9px] px-1.5 py-0">AI Gen</Badge>}
-                    {caps && !caps.imageGeneration && <span className="text-[9px] text-muted-foreground">(prompt)</span>}
-                  </button>
-                  <button
-                    onClick={() => caps?.videoGeneration && setContentType('video')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border
-                      ${contentType === 'video' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground'}
-                      ${caps?.videoGeneration ? 'cursor-pointer hover:text-foreground' : 'opacity-40 cursor-not-allowed'}`}
-                    title={caps && !caps.videoGeneration ? getUnavailableReason('videoGeneration', activeProvider?.model || '') : undefined}
-                  >
-                    <Video className="w-4 h-4" /> Video
-                    {caps?.videoGeneration && <Badge variant="success" className="text-[9px] px-1.5 py-0">AI Gen</Badge>}
-                    {caps && !caps.videoGeneration && <Ban className="w-3 h-3" />}
-                  </button>
+                {/* Content type: Photo / Video */}
+                <div>
+                  <p className="text-[11px] text-muted-foreground mb-1.5 font-medium">Content Type</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setContentType('image')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border cursor-pointer
+                        ${contentType === 'image' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                    >
+                      <ImageIcon className="w-4 h-4" /> Photo
+                    </button>
+                    <button
+                      onClick={() => caps?.videoGeneration && setContentType('video')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all border
+                        ${contentType === 'video' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground'}
+                        ${caps?.videoGeneration ? 'cursor-pointer hover:text-foreground' : 'opacity-40 cursor-not-allowed'}`}
+                      title={caps && !caps.videoGeneration ? getUnavailableReason('videoGeneration', activeProvider?.model || '') : undefined}
+                    >
+                      <Video className="w-4 h-4" /> Video
+                      {caps && !caps.videoGeneration && <Ban className="w-3 h-3" />}
+                    </button>
+                  </div>
                 </div>
-                {caps && !caps.videoGeneration && contentType === 'image' && !caps.imageGeneration && (
-                  <p className="text-[11px] text-muted-foreground flex items-center gap-1"><Info className="w-3 h-3" /> This model generates text prompts only. Use the prompt with an image generator.</p>
-                )}
+
+                {/* Output format: Image/Video or Prompt */}
+                <div>
+                  <p className="text-[11px] text-muted-foreground mb-1.5 font-medium">Output Format</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => canGenMedia && setOutputFormat('media')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium transition-all border
+                        ${outputFormat === 'media' && canGenMedia ? 'bg-success/10 border-success/30 text-success' : 'border-border text-muted-foreground'}
+                        ${canGenMedia ? 'cursor-pointer hover:text-foreground' : 'opacity-40 cursor-not-allowed'}`}
+                      title={!canGenMedia ? `${activeProvider?.model} cannot generate ${contentType === 'video' ? 'video' : 'images'}` : undefined}
+                    >
+                      {contentType === 'video' ? <Video className="w-3.5 h-3.5" /> : <ImageIcon className="w-3.5 h-3.5" />}
+                      {contentType === 'video' ? 'Video Output' : 'Image Output'}
+                      {canGenMedia && <Badge variant="success" className="text-[8px] px-1 py-0">AI</Badge>}
+                      {!canGenMedia && <Ban className="w-3 h-3" />}
+                    </button>
+                    <button
+                      onClick={() => setOutputFormat('prompt')}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium transition-all border cursor-pointer
+                        ${outputFormat === 'prompt' ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                    >
+                      <Copy className="w-3.5 h-3.5" /> Text Prompt
+                    </button>
+                  </div>
+                  {outputFormat === 'prompt' && canGenMedia && (
+                    <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
+                      <Info className="w-3 h-3 shrink-0" /> Will generate a detailed text prompt instead of {contentType === 'video' ? 'video' : 'an image'}. Use it with any external generator.
+                    </p>
+                  )}
+                  {!canGenMedia && outputFormat === 'media' && (
+                    <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
+                      <Info className="w-3 h-3 shrink-0" /> {getUnavailableReason(contentType === 'video' ? 'videoGeneration' : 'imageGeneration', activeProvider?.model || '')}
+                    </p>
+                  )}
+                </div>
 
                 <Button onClick={handleGenerate} loading={generating} className="w-full" size="lg" disabled={!selectedCharacter || !prompt.trim()}>
                   <Zap className="w-5 h-5" />
                   {generating ? 'Generating...'
-                    : contentType === 'video' && caps?.videoGeneration ? 'Generate Video'
-                    : caps?.imageGeneration ? 'Generate Image'
-                    : 'Generate Prompt'}
+                    : outputFormat === 'prompt' ? 'Generate Prompt'
+                    : contentType === 'video' ? 'Generate Video'
+                    : 'Generate Image'}
                 </Button>
               </div>
             )}
